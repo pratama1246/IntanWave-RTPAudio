@@ -18,6 +18,8 @@ fi
 
 # 2. Siapkan direktori storage & permissions
 echo "[*] Menyiapkan direktori penyimpanan persistent..."
+git update-index --assume-unchanged backend/storage/pa_system.db 2>/dev/null || true
+git config core.filemode false 2>/dev/null || true
 mkdir -p backend/storage/audio
 chmod -R 775 backend/storage
 
