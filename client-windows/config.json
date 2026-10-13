@@ -1,0 +1,7 @@
+{
+  "multicast_ip": "239.255.0.1",
+  "multicast_port": 5004,
+  "device_name": "Terminal Audio Node (Amplifier)",
+  "enable_toast": true,
+  "volume": 100
+}

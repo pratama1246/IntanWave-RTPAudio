@@ -1,0 +1,42 @@
+services:
+  audio-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: intanwave-audio-server:latest
+    container_name: intanwave-audio-server
+    restart: unless-stopped
+
+    # CATATAN PENTING UNTUK LINUX PRODUCTION:
+    # Gunakan host networking agar paket UDP Multicast (239.255.0.1:5004)
+    # langsung terpancar ke interface LAN fisik switch & IP Speaker fisik tanpa tertahan di bridge docker.
+    network_mode: "host"
+
+    environment:
+      - TZ=Asia/Jakarta
+      - PORT=7080
+      - MULTICAST_IP=239.255.0.1
+      - MULTICAST_PORT=5004
+
+    volumes:
+      # Persistent storage database SQLite dan berkas audio WAV
+      - ./backend/storage:/app/backend/storage
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ALTERNATIF JIKA MENGGUNAKAN BRIDGE NETWORK:
+# Jika tidak menggunakan 'network_mode: host', aktifkan baris ports di bawah ini:
+#    ports:
+#      - "7080:7080"
+#      - "5004:5004/udp"

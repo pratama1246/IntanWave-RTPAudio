@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Node & Frontend
+node_modules/
+frontend/node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Large binaries & Client build artifacts (Excludes 100MB+ binaries for GitHub)
+client-windows/build/
+client-windows/dist/
+client-windows/IntanWave-Node/
+*.exe
+*.dll
+
+# Database Backups & Private Local Dumps
+*.production_backup
+*.bak
+*.sqlite3-journal
+
+# Logs & Secrets
+*.log
+.env
+.env.local
+
+# IDE / System
+.vscode/
+.idea/
+.gemini/
+.DS_Store
+Thumbs.db

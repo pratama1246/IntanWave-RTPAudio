@@ -1,0 +1,307 @@
+import os
+import sys
+import socket
+import threading
+import tkinter as tk
+from tkinter import ttk, messagebox
+from pathlib import Path
+from PIL import Image
+import pystray
+
+from receiver import AudioReceiver
+
+# Single instance lock configuration
+SINGLE_INSTANCE_PORT = 45679
+
+
+def ensure_single_instance(on_show_callback):
+    """
+    Mencegah aplikasi dijalankan dua kali.
+    Jika sudah ada instansi yang berjalan, kirim sinyal agar instansi pertama
+    menampilkan jendelanya ke depan, lalu instansi kedua langsung keluar.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+        # Ini instansi pertama yang aktif
+        def _listen_signals():
+            while True:
+                try:
+                    data, _ = sock.recvfrom(64)
+                    if data == b"SHOW":
+                        on_show_callback()
+                except Exception:
+                    break
+
+        t = threading.Thread(target=_listen_signals, daemon=True)
+        t.start()
+        return sock
+    except Exception:
+        # Port sudah dipakai -> Instansi lain sudah berjalan!
+        try:
+            client_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            client_sock.sendto(b"SHOW", ("127.0.0.1", SINGLE_INSTANCE_PORT))
+            client_sock.close()
+        except Exception:
+            pass
+        sys.exit(0)
+
+
+# Enable Per-Monitor DPI Awareness on Windows
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+# Path resolution for standalone exe and development
+if getattr(sys, "frozen", False):
+    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    EXE_DIR = Path(sys.executable).resolve().parent
+else:
+    BUNDLE_DIR = Path(__file__).resolve().parent
+    EXE_DIR = BUNDLE_DIR
+
+ICO_PATH = BUNDLE_DIR / "app_icon.ico"
+if not ICO_PATH.exists():
+    ICO_PATH = EXE_DIR / "app_icon.ico"
+
+PNG_PATH = BUNDLE_DIR / "app_icon.png"
+if not PNG_PATH.exists():
+    PNG_PATH = EXE_DIR / "app_icon.png"
+
+
+class IntanWaveNodeWindow:
+    """
+    IntanWave Node — Terminal Audio Receiver
+    Native Windows Default UI, minimalis, efisien, terhubung ke sistem audio pelabuhan.
+    """
+
+    def __init__(self, root: tk.Tk, receiver: AudioReceiver):
+        self.root = root
+        self.receiver = receiver
+        self.tray_icon = None
+
+        self.root.title("IntanWave Node")
+        self.root.resizable(False, False)
+
+        # Set Window Icon
+        if ICO_PATH.exists():
+            try:
+                self.root.iconbitmap(str(ICO_PATH.resolve()))
+            except Exception:
+                pass
+
+        # Apply Windows Native Theme
+        self.style = ttk.Style()
+        themes = self.style.theme_names()
+        if "vista" in themes:
+            self.style.theme_use("vista")
+        elif "winnative" in themes:
+            self.style.theme_use("winnative")
+
+        # Configure font and button styles with proper Windows native padding
+        self.style.configure(".", font=("Segoe UI", 9))
+        self.style.configure("HeaderTitle.TLabel", font=("Segoe UI", 12, "bold"), foreground="#1c1c1c")
+        self.style.configure("HeaderSub.TLabel", font=("Segoe UI", 8), foreground="#555555")
+        self.style.configure("Save.TButton", font=("Segoe UI", 9, "bold"), padding=(10, 5))
+        self.style.configure("Action.TButton", font=("Segoe UI", 9), padding=(8, 5))
+
+        self.init_ui()
+        self.setup_tray()
+
+        # Dynamic window geometry calculation: prevents clipping on high-DPI displays
+        self.root.update_idletasks()
+        req_w = max(400, self.root.winfo_reqwidth() + 16)
+        req_h = max(360, self.root.winfo_reqheight() + 20)
+        self.root.geometry(f"{req_w}x{req_h}")
+
+        # Handle window close (X) -> minimize to tray
+        self.root.protocol("WM_DELETE_WINDOW", self.on_window_close)
+
+
+    def init_ui(self):
+        main_frame = ttk.Frame(self.root, padding="18 14 18 14")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Header (Bersih & Elegan)
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 10))
+
+        lbl_title = ttk.Label(header_frame, text="IntanWave Node", style="HeaderTitle.TLabel")
+        lbl_title.pack(anchor=tk.W)
+
+        lbl_sub = ttk.Label(
+            header_frame, 
+            text="IP Multicast Audio Receiver",
+            style="HeaderSub.TLabel"
+        )
+        lbl_sub.pack(anchor=tk.W, pady=(1, 0))
+
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 12))
+
+        # 2. Form Konfigurasi Alamat RTP
+        cfg_frame = ttk.LabelFrame(main_frame, text=" Konfigurasi Alamat RTP ", padding="14 12 14 12")
+        cfg_frame.pack(fill=tk.X, pady=(0, 14))
+
+        cfg_grid = ttk.Frame(cfg_frame)
+        cfg_grid.pack(fill=tk.X)
+        cfg_grid.columnconfigure(1, weight=1)
+
+        ttk.Label(cfg_grid, text="Alamat IP Multicast:").grid(row=0, column=0, sticky=tk.W, pady=4)
+        self.entry_ip = ttk.Entry(cfg_grid)
+        self.entry_ip.insert(0, self.receiver.multicast_ip)
+        self.entry_ip.grid(row=0, column=1, sticky=tk.EW, padx=(10, 0), pady=4)
+
+        ttk.Label(cfg_grid, text="Port RTP (UDP):").grid(row=1, column=0, sticky=tk.W, pady=4)
+        self.entry_port = ttk.Entry(cfg_grid)
+        self.entry_port.insert(0, str(self.receiver.multicast_port))
+        self.entry_port.grid(row=1, column=1, sticky=tk.EW, padx=(10, 0), pady=4)
+
+        # Tombol Simpan dengan padding lega dan proporsional
+        self.btn_save = ttk.Button(
+            cfg_frame, 
+            text="Simpan & Terapkan Alamat", 
+            style="Save.TButton",
+            command=self.save_settings
+        )
+        self.btn_save.pack(fill=tk.X, pady=(12, 4))
+
+        # 3. Action Buttons (Tes Bunyi Ampli & Sembunyikan)
+        btn_box = ttk.Frame(main_frame)
+        btn_box.pack(fill=tk.X, pady=(6, 0))
+
+        self.btn_test = ttk.Button(
+            btn_box, 
+            text="🔔 Tes Bunyi Ampli", 
+            style="Action.TButton",
+            command=self.receiver.play_test_chime
+        )
+        self.btn_test.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        self.btn_hide = ttk.Button(
+            btn_box, 
+            text="Sembunyikan ke Tray", 
+            style="Action.TButton",
+            command=self.hide_window
+        )
+        self.btn_hide.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+
+
+    def save_settings(self):
+        new_ip = self.entry_ip.get().strip()
+        new_port = self.entry_port.get().strip()
+
+        if not new_ip or not new_port:
+            messagebox.showwarning("Peringatan", "Alamat IP dan Port tidak boleh kosong.", parent=self.root)
+            return
+
+        try:
+            port_num = int(new_port)
+            self.receiver.save_config(new_ip, port_num)
+            messagebox.showinfo(
+                "Berhasil", 
+                f"Konfigurasi disimpan!\nReceiver mendengarkan rtp://{new_ip}:{port_num}",
+                parent=self.root
+            )
+        except ValueError:
+            messagebox.showerror("Error", "Port harus berupa angka valid (misal: 5004).", parent=self.root)
+
+    def update_status(self, status: str):
+        """Thread-safe status update callback dari receiver."""
+        def _apply():
+            if status == "STREAMING":
+                self.root.title("IntanWave Node [STREAMING]")
+                if self.tray_icon:
+                    self.tray_icon.title = "IntanWave Node — SEDANG SIARAN"
+            else:
+                self.root.title("IntanWave Node")
+                if self.tray_icon:
+                    self.tray_icon.title = "IntanWave Node — Standby"
+
+        self.root.after(0, _apply)
+
+    def setup_tray(self):
+        """Inisialisasi Windows System Tray Icon via pystray."""
+        try:
+            if PNG_PATH.exists():
+                icon_image = Image.open(str(PNG_PATH.resolve()))
+            elif ICO_PATH.exists():
+                icon_image = Image.open(str(ICO_PATH.resolve()))
+            else:
+                icon_image = Image.new("RGB", (64, 64), color="#0055ff")
+        except Exception:
+            icon_image = Image.new("RGB", (64, 64), color="#0055ff")
+
+        menu = pystray.Menu(
+            pystray.MenuItem("IntanWave Node", None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Buka Panel Kontrol", self.on_tray_show, default=True),
+            pystray.MenuItem("🔔 Tes Bunyi Ampli", lambda: self.receiver.play_test_chime()),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Keluar", self.on_tray_quit)
+        )
+
+        self.tray_icon = pystray.Icon("IntanWave_Node", icon_image, "IntanWave Node — Standby", menu)
+        self.tray_icon.run_detached()
+
+    def on_tray_show(self, icon=None, item=None):
+        self.root.after(0, self.show_window)
+
+    def show_window(self):
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def hide_window(self):
+        self.root.withdraw()
+
+    def on_window_close(self):
+        """Saat user klik tanda silang (X), sembunyikan jendela ke tray."""
+        self.hide_window()
+
+    def on_tray_quit(self, icon=None, item=None):
+        """Keluar aplikasi sepenuhnya."""
+        def _do_quit():
+            self.receiver.stop()
+            if self.tray_icon:
+                self.tray_icon.stop()
+            self.root.quit()
+            self.root.destroy()
+            sys.exit(0)
+
+        self.root.after(0, _do_quit)
+
+
+class ClientApp:
+    def __init__(self):
+        # Cegah aplikasi dijalankan dua kali
+        self.lock_socket = ensure_single_instance(self.restore_existing_window)
+
+        self.root = tk.Tk()
+        self.receiver = AudioReceiver()
+        self.window = IntanWaveNodeWindow(self.root, self.receiver)
+        self.receiver.on_status_change = self.window.update_status
+
+
+    def restore_existing_window(self):
+        """Callback dipanggil saat user mencoba membuka aplikasi kedua kali."""
+        if hasattr(self, "root") and self.root:
+            self.root.after(0, self.window.show_window)
+
+    def run(self):
+        self.receiver.start()
+        self.root.mainloop()
+
+
+def main():
+    app = ClientApp()
+    app.run()
+
+
+if __name__ == "__main__":
+    main()

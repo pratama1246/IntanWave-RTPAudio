@@ -1,0 +1,27 @@
+.git
+.gitignore
+.gemini
+.vscode
+.idea
+
+# Python caches & venvs
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.venv
+**/env
+**/venv
+
+# Node & Frontend build temp
+frontend/node_modules
+frontend/.oxlintrc.json
+
+# Client Windows files (tidak dibutuhkan di server Linux Docker)
+client-windows/
+*.bat
+
+# Logs & temp
+*.log
+tmp/
+temp/
