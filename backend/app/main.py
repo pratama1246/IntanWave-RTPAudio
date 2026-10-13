@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -16,6 +16,7 @@ from app.database import (
     init_db, get_db, log_event, get_settings, update_settings,
     get_all_speakers, get_speaker_by_id, create_speaker, update_speaker, 
     delete_speaker, update_speaker_status,
+    upsert_node_heartbeat, mark_stale_nodes_offline,
     get_all_zones, create_zone, update_zone, delete_zone
 )
 from app.audio_engine import audio_engine
@@ -302,27 +303,27 @@ def play_audio(req: PlayRequest):
 
     if req.target_mode == "zone" and req.target_zone:
         with get_db() as conn:
-            rows = conn.execute("SELECT ip_address, port FROM speakers WHERE zone = ? AND enabled = 1", (req.target_zone,)).fetchall()
+            rows = conn.execute("SELECT ip_address, port FROM speakers WHERE zone = ? AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", (req.target_zone,)).fetchall()
             if rows:
                 target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in rows]
                 target_desc = f"Zona {req.target_zone} ({len(target_endpoints)} Speaker)"
     elif req.target_mode == "speaker" and req.speaker_id:
         with get_db() as conn:
-            sp = conn.execute("SELECT ip_address, port, name FROM speakers WHERE id = ? AND enabled = 1", (req.speaker_id,)).fetchone()
+            sp = conn.execute("SELECT ip_address, port, name FROM speakers WHERE id = ? AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", (req.speaker_id,)).fetchone()
             if sp:
                 target_endpoints = [f"{sp['ip_address']}:{sp['port']}"]
                 target_desc = f"Speaker {sp['name']}"
     elif req.target_mode == "custom" and req.speaker_ids:
         with get_db() as conn:
             placeholders = ",".join(["?"] * len(req.speaker_ids))
-            rows = conn.execute(f"SELECT ip_address, port FROM speakers WHERE id IN ({placeholders}) AND enabled = 1", req.speaker_ids).fetchall()
+            rows = conn.execute(f"SELECT ip_address, port FROM speakers WHERE id IN ({placeholders}) AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", req.speaker_ids).fetchall()
             if rows:
                 target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in rows]
                 target_desc = f"{len(target_endpoints)} Speaker Terpilih"
     else:
         # Mode "all" (Semua Speaker): Kirim ke seluruh IP speaker fisik terdaftar + Multicast
         with get_db() as conn:
-            rows = conn.execute("SELECT ip_address, port FROM speakers WHERE enabled = 1").fetchall()
+            rows = conn.execute("SELECT ip_address, port FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
             settings = get_settings()
             mc_ip = settings.get("multicast_ip", DEFAULT_MULTICAST_IP)
             mc_port = settings.get("multicast_port", str(DEFAULT_MULTICAST_PORT))
@@ -358,6 +359,7 @@ class SpeakerCreate(BaseModel):
     ip_address: str
     port: int = 5004
     zone: str = "Dermaga"
+    device_type: Optional[str] = "physical"
 
 class SpeakerUpdate(BaseModel):
     name: str
@@ -365,6 +367,58 @@ class SpeakerUpdate(BaseModel):
     port: int = 5004
     zone: str = "Dermaga"
     enabled: int = 1
+    device_type: Optional[str] = "physical"
+
+class NodeHeartbeatRequest(BaseModel):
+    node_id: str
+    device_name: Optional[str] = None
+    zone: Optional[str] = None
+    port: Optional[int] = 5004
+    hostname: Optional[str] = None
+    client_ip: Optional[str] = None
+    force_update: Optional[bool] = False
+
+@app.post("/api/nodes/heartbeat")
+async def node_heartbeat(req: NodeHeartbeatRequest, request: Request):
+    """
+    Endpoint deteksi otomatis (auto-discovery) dan heartbeat dinamis untuk PC client Windows (DHCP).
+    Merekam IP aktif pengirim secara otomatis dan menyinkronkan dengan database server.
+    """
+    client_ip = request.headers.get("X-Forwarded-For")
+    if client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    elif request.headers.get("X-Real-IP"):
+        client_ip = request.headers.get("X-Real-IP").strip()
+    elif request.client and request.client.host:
+        client_ip = request.client.host
+    else:
+        client_ip = ""
+
+    if (client_ip in ("127.0.0.1", "localhost", "::1", "") and req.client_ip):
+        client_ip = req.client_ip
+    elif not client_ip:
+        client_ip = req.client_ip or "127.0.0.1"
+
+    node = upsert_node_heartbeat(
+        node_id=req.node_id,
+        device_name=req.device_name or "",
+        zone=req.zone or "",
+        ip_address=client_ip,
+        port=req.port or 5004,
+        hostname=req.hostname or "",
+        force_update=bool(req.force_update)
+    )
+
+    # Broadcast pembaruan speaker seketika ke Web Dashboard
+    await manager.broadcast({
+        "type": "speakers_update",
+        "speakers": get_all_speakers()
+    })
+
+    return {
+        "status": "ok",
+        "node": node
+    }
 
 @app.get("/api/speakers")
 def list_speakers():
@@ -373,7 +427,7 @@ def list_speakers():
 @app.post("/api/speakers")
 def add_speaker(s: SpeakerCreate):
     try:
-        new_id = create_speaker(s.name, s.ip_address, s.port, s.zone)
+        new_id = create_speaker(s.name, s.ip_address, s.port, s.zone, s.device_type or "physical")
         log_event("SPEAKER_ADDED", f"Menambah speaker '{s.name}' ({s.ip_address}) ke {s.zone}")
         return {"message": "Speaker berhasil ditambahkan", "id": new_id}
     except Exception as e:
@@ -402,8 +456,22 @@ async def ping_single_speaker(speaker_id: int):
     sp = get_speaker_by_id(speaker_id)
     if not sp:
         raise HTTPException(status_code=404, detail="Speaker tidak ditemukan")
-    is_online, latency = await ping_ip(sp["ip_address"])
-    status = "online" if is_online else "offline"
+
+    if sp.get("device_type") == "node":
+        last_online_str = sp.get("last_online")
+        is_online = False
+        if last_online_str:
+            try:
+                from datetime import datetime
+                is_online = (datetime.now() - datetime.fromisoformat(last_online_str)).total_seconds() <= 45
+            except Exception:
+                pass
+        status = "online" if is_online else "offline"
+        latency = 1 if is_online else 0
+    else:
+        is_online, latency = await ping_ip(sp["ip_address"])
+        status = "online" if is_online else "offline"
+
     update_speaker_status(speaker_id, status, latency)
     updated = get_speaker_by_id(speaker_id)
     await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})

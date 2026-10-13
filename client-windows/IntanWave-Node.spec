@@ -24,8 +24,7 @@ a = Analysis(
         'PySide6', 'shiboken6', 'qfluentwidgets', 
         'numpy', 'pandas', 'matplotlib', 'scipy', 
         'openai', 'azure', 'unittest', 'pydoc',
-        'ssl', '_ssl', '_hashlib', 'hashlib',
-        'email', 'http', 'urllib', 'xmlrpc',
+        'xmlrpc',
         'lzma', '_lzma', 'bz2', '_bz2', 'zstandard', '_zstd',
         'decimal', '_decimal'
     ],

@@ -48,9 +48,35 @@ async def ping_ip(ip: str, timeout_ms: int = 1000) -> tuple[bool, int]:
 
 async def check_speaker(speaker: Dict[str, Any]) -> Dict[str, Any]:
     """Cek 1 speaker dan update database."""
+    # Untuk node PC Windows client, status online ditentukan oleh penerimaan heartbeat (timeout 45 detik)
+    # Hal ini mencegah salah deteksi 'offline' akibat Windows Firewall yang memblokir ICMP echo request (ping)
+    if speaker.get("device_type") == "node":
+        last_online_str = speaker.get("last_online")
+        is_online = False
+        if last_online_str:
+            try:
+                from datetime import datetime
+                last_dt = datetime.fromisoformat(last_online_str)
+                is_online = (datetime.now() - last_dt).total_seconds() <= 45
+            except Exception:
+                pass
+        status = "online" if is_online else "offline"
+        latency = 1 if is_online else 0
+        update_speaker_status(speaker["id"], status, latency)
+
+        speaker_copy = dict(speaker)
+        speaker_copy["status"] = status
+        speaker_copy["latency_ms"] = latency
+        return speaker_copy
+
     ip = speaker.get("ip_address", "")
-    is_online, latency = await ping_ip(ip)
-    status = "online" if is_online else "offline"
+    if ip.startswith("pending-"):
+        status = "offline"
+        latency = 0
+    else:
+        is_online, latency = await ping_ip(ip)
+        status = "online" if is_online else "offline"
+
     update_speaker_status(speaker["id"], status, latency)
 
     speaker_copy = dict(speaker)

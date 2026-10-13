@@ -7,6 +7,9 @@ import struct
 import threading
 import subprocess
 import shutil
+import uuid
+import urllib.request
+import urllib.error
 from pathlib import Path
 from winotify import Notification, audio
 
@@ -63,20 +66,32 @@ def get_ffplay_bin():
     return "ffplay"
 
 class AudioReceiver:
-    def __init__(self, on_status_change=None):
+    def __init__(self, on_status_change=None, on_heartbeat_change=None):
         self.config = self.load_config()
+        self.server_url = self.config.get("server_url", "http://10.183.55.114:7080").rstrip("/")
+        self.node_id = self.config.get("node_id", "")
+        self.device_name = self.config.get("device_name", f"Terminal Audio ({socket.gethostname()})")
+        self.zone = self.config.get("zone", "Kantor & Kontrol")
         self.multicast_ip = self.config.get("multicast_ip", "239.255.0.1")
         self.multicast_port = int(self.config.get("multicast_port", 5004))
-        self.device_name = self.config.get("device_name", "Terminal Audio (Amplifier)")
         
         self.status = "STANDBY"  # STANDBY | STREAMING
         self.is_running = False
         self.on_status_change = on_status_change
+        self.on_heartbeat_change = on_heartbeat_change
         
+        # Telemetri Auto-Discovery / Heartbeat
+        self.server_connected = False
+        self.registered_ip = ""
+        self.registered_zone = self.zone
+        self.last_heartbeat_time = 0
+        self.last_heartbeat_error = ""
+
         self.player_proc = None
         self.last_packet_time = 0
         self.sock = None
         self.thread = None
+        self.heartbeat_thread = None
         self.last_toast_time = 0
         
         # RTP Sequence Number Deduplication (Mencegah gema/suara dobel)
@@ -85,31 +100,66 @@ class AudioReceiver:
         self.max_history = 512
 
     def load_config(self):
+        cfg = {}
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE, "r") as f:
-                    return json.load(f)
+                    cfg = json.load(f)
             except Exception:
                 pass
-        return {
-            "multicast_ip": "239.255.0.1",
-            "multicast_port": 5004,
-            "device_name": "Terminal Audio (Amplifier)",
-            "enable_toast": True
-        }
 
-    def save_config(self, ip, port, device_name=None):
-        """Menyimpan konfigurasi baru dan me-restart socket receiver."""
+        changed = False
+        if not cfg.get("server_url"):
+            cfg["server_url"] = "http://10.183.55.114:7080"
+            changed = True
+        if not cfg.get("node_id"):
+            cfg["node_id"] = f"node_{uuid.uuid4().hex[:8]}"
+            changed = True
+        if not cfg.get("device_name"):
+            cfg["device_name"] = f"Terminal Audio ({socket.gethostname()})"
+            changed = True
+        if not cfg.get("zone"):
+            cfg["zone"] = "Kantor & Kontrol"
+            changed = True
+        if not cfg.get("multicast_ip"):
+            cfg["multicast_ip"] = "239.255.0.1"
+            changed = True
+        if not cfg.get("multicast_port"):
+            cfg["multicast_port"] = 5004
+            changed = True
+        if "enable_toast" not in cfg:
+            cfg["enable_toast"] = True
+            changed = True
+        if "volume" not in cfg:
+            cfg["volume"] = 100
+            changed = True
+
+        if changed:
+            target_path = EXE_DIR / "config.json"
+            try:
+                with open(target_path, "w") as f:
+                    json.dump(cfg, f, indent=2)
+            except Exception:
+                pass
+        return cfg
+
+    def save_config(self, server_url, device_name, zone, ip, port):
+        """Menyimpan konfigurasi baru, me-restart socket receiver, dan mengirim heartbeat pembaruan ke server."""
+        self.server_url = server_url.strip().rstrip("/")
+        self.device_name = device_name.strip()
+        self.zone = zone.strip()
         self.multicast_ip = ip.strip()
         self.multicast_port = int(port)
-        if device_name:
-            self.device_name = device_name.strip()
             
         data = {
+            "server_url": self.server_url,
+            "node_id": self.node_id,
+            "device_name": self.device_name,
+            "zone": self.zone,
             "multicast_ip": self.multicast_ip,
             "multicast_port": self.multicast_port,
-            "device_name": self.device_name,
-            "enable_toast": self.config.get("enable_toast", True)
+            "enable_toast": self.config.get("enable_toast", True),
+            "volume": self.config.get("volume", 100)
         }
         self.config = data
         
@@ -125,6 +175,84 @@ class AudioReceiver:
         self.stop()
         time.sleep(0.3)
         self.start()
+
+        # Kirim sinyal heartbeat pembaruan seketika ke server (force_update=True)
+        threading.Thread(target=lambda: self.send_heartbeat(force_update=True), daemon=True).start()
+
+    def send_heartbeat(self, force_update=False):
+        """Mengirim heartbeat dan auto-registrasi ke server PA Audio Pelindo."""
+        if not self.server_url or not self.node_id:
+            return False
+
+        url = f"{self.server_url}/api/nodes/heartbeat"
+        payload = {
+            "node_id": self.node_id,
+            "device_name": self.device_name,
+            "zone": self.zone,
+            "port": self.multicast_port,
+            "hostname": socket.gethostname(),
+            "force_update": force_update
+        }
+
+        # Deteksi local interface IP yang mengarah ke server
+        try:
+            target_host = self.server_url.split("://")[-1].split(":")[0].split("/")[0]
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect((target_host, 80))
+            payload["client_ip"] = s.getsockname()[0]
+            s.close()
+        except Exception:
+            try:
+                payload["client_ip"] = socket.gethostbyname(socket.gethostname())
+            except Exception:
+                pass
+
+        try:
+            req_data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=req_data,
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "IntanWaveNode/1.0"
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=3.5) as resp:
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    node_data = body.get("node", {})
+                    self.server_connected = True
+                    self.registered_ip = node_data.get("ip_address") or payload.get("client_ip", "")
+                    self.registered_zone = node_data.get("zone") or self.zone
+                    self.last_heartbeat_time = time.time()
+                    self.last_heartbeat_error = ""
+
+                    if self.on_heartbeat_change:
+                        self.on_heartbeat_change(True, node_data)
+                    return True
+        except Exception as e:
+            self.server_connected = False
+            self.last_heartbeat_error = str(e)
+            if self.on_heartbeat_change:
+                self.on_heartbeat_change(False, {"error": str(e)})
+
+        return False
+
+    def _heartbeat_loop(self):
+        """Loop latar belakang mengirim heartbeat setiap 15 detik."""
+        # Kirim pertama kali langsung setelah start
+        time.sleep(0.5)
+        self.send_heartbeat(force_update=False)
+
+        while self.is_running:
+            for _ in range(15):
+                if not self.is_running:
+                    break
+                time.sleep(1)
+
+            if self.is_running:
+                self.send_heartbeat(force_update=False)
 
     def notify_toast(self, title, msg):
         """Memunculkan Push Notification Native Windows seketika (non-blocking thread)."""
@@ -168,6 +296,8 @@ class AudioReceiver:
         self.is_running = True
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
+        self.heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self.heartbeat_thread.start()
 
     def stop(self):
         self.is_running = False

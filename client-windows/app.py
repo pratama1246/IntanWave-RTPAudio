@@ -116,8 +116,8 @@ class IntanWaveNodeWindow:
 
         # Dynamic window geometry calculation: prevents clipping on high-DPI displays
         self.root.update_idletasks()
-        req_w = max(400, self.root.winfo_reqwidth() + 16)
-        req_h = max(360, self.root.winfo_reqheight() + 20)
+        req_w = max(420, self.root.winfo_reqwidth() + 20)
+        req_h = max(470, self.root.winfo_reqheight() + 20)
         self.root.geometry(f"{req_w}x{req_h}")
 
         # Handle window close (X) -> minimize to tray
@@ -130,50 +130,85 @@ class IntanWaveNodeWindow:
 
         # 1. Header (Bersih & Elegan)
         header_frame = ttk.Frame(main_frame)
-        header_frame.pack(fill=tk.X, pady=(0, 10))
+        header_frame.pack(fill=tk.X, pady=(0, 8))
 
         lbl_title = ttk.Label(header_frame, text="IntanWave Node", style="HeaderTitle.TLabel")
         lbl_title.pack(anchor=tk.W)
 
         lbl_sub = ttk.Label(
             header_frame, 
-            text="IP Multicast Audio Receiver",
+            text="IP Multicast Audio Receiver & Auto-Discovery",
             style="HeaderSub.TLabel"
         )
         lbl_sub.pack(anchor=tk.W, pady=(1, 0))
 
-        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 12))
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 10))
 
-        # 2. Form Konfigurasi Alamat RTP
-        cfg_frame = ttk.LabelFrame(main_frame, text=" Konfigurasi Alamat RTP ", padding="14 12 14 12")
-        cfg_frame.pack(fill=tk.X, pady=(0, 14))
+        # 2. Form Server & Node Identity
+        srv_frame = ttk.LabelFrame(main_frame, text=" Server & Identitas Node ", padding="12 10 12 10")
+        srv_frame.pack(fill=tk.X, pady=(0, 10))
+
+        srv_grid = ttk.Frame(srv_frame)
+        srv_grid.pack(fill=tk.X)
+        srv_grid.columnconfigure(1, weight=1)
+
+        ttk.Label(srv_grid, text="Server PA Audio:").grid(row=0, column=0, sticky=tk.W, pady=3)
+        self.entry_server = ttk.Entry(srv_grid)
+        self.entry_server.insert(0, self.receiver.server_url)
+        self.entry_server.grid(row=0, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
+
+        ttk.Label(srv_grid, text="Nama Perangkat:").grid(row=1, column=0, sticky=tk.W, pady=3)
+        self.entry_name = ttk.Entry(srv_grid)
+        self.entry_name.insert(0, self.receiver.device_name)
+        self.entry_name.grid(row=1, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
+
+        ttk.Label(srv_grid, text="Zona Lokasi:").grid(row=2, column=0, sticky=tk.W, pady=3)
+        self.entry_zone = ttk.Entry(srv_grid)
+        self.entry_zone.insert(0, self.receiver.zone)
+        self.entry_zone.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
+
+        # 3. Form Konfigurasi Alamat RTP
+        cfg_frame = ttk.LabelFrame(main_frame, text=" Konfigurasi Alamat RTP ", padding="12 10 12 10")
+        cfg_frame.pack(fill=tk.X, pady=(0, 10))
 
         cfg_grid = ttk.Frame(cfg_frame)
         cfg_grid.pack(fill=tk.X)
         cfg_grid.columnconfigure(1, weight=1)
 
-        ttk.Label(cfg_grid, text="Alamat IP Multicast:").grid(row=0, column=0, sticky=tk.W, pady=4)
+        ttk.Label(cfg_grid, text="Alamat IP Multicast:").grid(row=0, column=0, sticky=tk.W, pady=3)
         self.entry_ip = ttk.Entry(cfg_grid)
         self.entry_ip.insert(0, self.receiver.multicast_ip)
-        self.entry_ip.grid(row=0, column=1, sticky=tk.EW, padx=(10, 0), pady=4)
+        self.entry_ip.grid(row=0, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
-        ttk.Label(cfg_grid, text="Port RTP (UDP):").grid(row=1, column=0, sticky=tk.W, pady=4)
+        ttk.Label(cfg_grid, text="Port RTP (UDP):").grid(row=1, column=0, sticky=tk.W, pady=3)
         self.entry_port = ttk.Entry(cfg_grid)
         self.entry_port.insert(0, str(self.receiver.multicast_port))
-        self.entry_port.grid(row=1, column=1, sticky=tk.EW, padx=(10, 0), pady=4)
+        self.entry_port.grid(row=1, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
-        # Tombol Simpan dengan padding lega dan proporsional
+        # 4. Status Indikator Server (Live Heartbeat Badge)
+        status_frame = ttk.Frame(main_frame)
+        status_frame.pack(fill=tk.X, pady=(0, 8))
+
+        self.lbl_server_status = ttk.Label(
+            status_frame,
+            text="🟡 Menghubungkan ke Server PA...",
+            font=("Segoe UI", 8, "bold"),
+            foreground="#b45309"
+        )
+        self.lbl_server_status.pack(anchor=tk.W)
+
+        # 5. Tombol Simpan
         self.btn_save = ttk.Button(
-            cfg_frame, 
-            text="Simpan & Terapkan Alamat", 
+            main_frame, 
+            text="Simpan & Terapkan Konfigurasi", 
             style="Save.TButton",
             command=self.save_settings
         )
-        self.btn_save.pack(fill=tk.X, pady=(12, 4))
+        self.btn_save.pack(fill=tk.X, pady=(0, 10))
 
-        # 3. Action Buttons (Tes Bunyi Ampli & Sembunyikan)
+        # 6. Action Buttons (Tes Bunyi Ampli & Sembunyikan)
         btn_box = ttk.Frame(main_frame)
-        btn_box.pack(fill=tk.X, pady=(6, 0))
+        btn_box.pack(fill=tk.X)
 
         self.btn_test = ttk.Button(
             btn_box, 
@@ -193,23 +228,52 @@ class IntanWaveNodeWindow:
 
 
     def save_settings(self):
+        new_server = self.entry_server.get().strip()
+        new_name = self.entry_name.get().strip()
+        new_zone = self.entry_zone.get().strip()
         new_ip = self.entry_ip.get().strip()
         new_port = self.entry_port.get().strip()
 
+        if not new_server:
+            messagebox.showwarning("Peringatan", "URL Server PA Audio tidak boleh kosong.", parent=self.root)
+            return
+        if not new_name:
+            messagebox.showwarning("Peringatan", "Nama Perangkat tidak boleh kosong.", parent=self.root)
+            return
+        if not new_zone:
+            messagebox.showwarning("Peringatan", "Zona Lokasi tidak boleh kosong.", parent=self.root)
+            return
         if not new_ip or not new_port:
-            messagebox.showwarning("Peringatan", "Alamat IP dan Port tidak boleh kosong.", parent=self.root)
+            messagebox.showwarning("Peringatan", "Alamat IP Multicast dan Port tidak boleh kosong.", parent=self.root)
             return
 
         try:
             port_num = int(new_port)
-            self.receiver.save_config(new_ip, port_num)
+            self.receiver.save_config(new_server, new_name, new_zone, new_ip, port_num)
             messagebox.showinfo(
                 "Berhasil", 
-                f"Konfigurasi disimpan!\nReceiver mendengarkan rtp://{new_ip}:{port_num}",
+                f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nZona: {new_zone}\nReceiver: rtp://{new_ip}:{port_num}",
                 parent=self.root
             )
         except ValueError:
             messagebox.showerror("Error", "Port harus berupa angka valid (misal: 5004).", parent=self.root)
+
+    def update_heartbeat_status(self, connected: bool, info: dict):
+        """Thread-safe status update untuk telemetri heartbeat dari server."""
+        def _apply():
+            if connected:
+                registered_ip = info.get("ip_address", self.receiver.registered_ip)
+                zone = info.get("zone", self.receiver.zone)
+                self.lbl_server_status.config(
+                    text=f"🟢 Terdaftar di Server ({registered_ip}) • Zona: {zone}",
+                    foreground="#0d7a3e"
+                )
+            else:
+                self.lbl_server_status.config(
+                    text=f"🔴 Belum Terhubung ke Server ({self.receiver.server_url})",
+                    foreground="#c22525"
+                )
+        self.root.after(0, _apply)
 
     def update_status(self, status: str):
         """Thread-safe status update callback dari receiver."""
@@ -286,6 +350,7 @@ class ClientApp:
         self.receiver = AudioReceiver()
         self.window = IntanWaveNodeWindow(self.root, self.receiver)
         self.receiver.on_status_change = self.window.update_status
+        self.receiver.on_heartbeat_change = self.window.update_heartbeat_status
 
 
     def restore_existing_window(self):

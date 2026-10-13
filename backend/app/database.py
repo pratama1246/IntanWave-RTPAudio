@@ -130,6 +130,16 @@ def init_db():
         if "category" not in audio_cols:
             cursor.execute("ALTER TABLE audio_files ADD COLUMN category TEXT DEFAULT 'biasa'")
         
+        # Migrations for speakers table (Auto-discovery & Node Client Support)
+        speaker_cols = [c[1] for c in cursor.execute("PRAGMA table_info(speakers)").fetchall()]
+        if "node_id" not in speaker_cols:
+            cursor.execute("ALTER TABLE speakers ADD COLUMN node_id TEXT")
+        if "device_type" not in speaker_cols:
+            cursor.execute("ALTER TABLE speakers ADD COLUMN device_type TEXT DEFAULT 'physical'")
+        if "hostname" not in speaker_cols:
+            cursor.execute("ALTER TABLE speakers ADD COLUMN hostname TEXT DEFAULT ''")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_speakers_node_id ON speakers(node_id) WHERE node_id IS NOT NULL")
+
         # Ensure siren / ews files are tagged as 'darurat'
         cursor.execute("""
             UPDATE audio_files 
@@ -188,15 +198,15 @@ def get_speaker_by_id(speaker_id: int) -> Optional[Dict[str, Any]]:
         row = conn.execute("SELECT * FROM speakers WHERE id = ?", (speaker_id,)).fetchone()
         return dict(row) if row else None
 
-def create_speaker(name: str, ip_address: str, port: int = 5004, zone: str = "Dermaga") -> int:
+def create_speaker(name: str, ip_address: str, port: int = 5004, zone: str = "Dermaga", device_type: str = "physical") -> int:
     zone = (zone or "Dermaga").strip()
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (zone,))
         cursor.execute("""
-            INSERT INTO speakers (name, ip_address, port, zone, status)
-            VALUES (?, ?, ?, ?, 'unknown')
-        """, (name, ip_address, port, zone))
+            INSERT INTO speakers (name, ip_address, port, zone, status, device_type)
+            VALUES (?, ?, ?, ?, 'unknown', ?)
+        """, (name, ip_address, port, zone, device_type))
         conn.commit()
         return cursor.lastrowid
 
@@ -232,6 +242,128 @@ def update_speaker_status(speaker_id: int, status: str, latency_ms: int = 0):
                 WHERE id = ?
             """, (status, now, speaker_id))
         conn.commit()
+
+# --- AUTO-DISCOVERY & DYNAMIC NODE HEARTBEAT ---
+def upsert_node_heartbeat(
+    node_id: str,
+    device_name: str,
+    zone: str,
+    ip_address: str,
+    port: int = 5004,
+    hostname: str = "",
+    force_update: bool = False
+) -> Dict[str, Any]:
+    """
+    Mendaftarkan atau memperbarui status node client PC Windows secara dinamis.
+    Menangani perubahan IP akibat DHCP secara transparan tanpa benturan SQLite UNIQUE constraint.
+    """
+    node_id = (node_id or "").strip()
+    if not node_id:
+        raise ValueError("node_id tidak boleh kosong")
+
+    zone = (zone or "Kantor & Kontrol").strip()
+    device_name = (device_name or f"PC Audio ({hostname or node_id})").strip()
+    now = datetime.now().isoformat()
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+
+        # 1. Pastikan zona terdaftar
+        cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (zone,))
+
+        # 2. Tangani benturan IP jika IP ini pernah dipegang oleh record lain
+        # (misal lease IP DHCP berpindah dari perangkat lama ke node ini)
+        cursor.execute(
+            "SELECT id, node_id, name FROM speakers WHERE ip_address = ? AND (node_id IS NULL OR node_id != ?)",
+            (ip_address, node_id)
+        )
+        conflicts = cursor.fetchall()
+        for conf in conflicts:
+            c_id = conf["id"]
+            cursor.execute(
+                "UPDATE speakers SET ip_address = ?, status = 'offline' WHERE id = ?",
+                (f"pending-{c_id}-{int(datetime.now().timestamp())}", c_id)
+            )
+
+        # 3. Cek apakah node_id sudah ada di database
+        cursor.execute("SELECT * FROM speakers WHERE node_id = ?", (node_id,))
+        existing = cursor.fetchone()
+
+        if existing:
+            speaker_id = existing["id"]
+            # Jika force_update = True (dari pengaturan GUI client), update juga nama dan zona
+            if force_update:
+                cursor.execute("""
+                    UPDATE speakers
+                    SET name = ?,
+                        ip_address = ?,
+                        port = ?,
+                        zone = ?,
+                        hostname = ?,
+                        status = 'online',
+                        latency_ms = 1,
+                        last_online = ?,
+                        last_checked = ?,
+                        device_type = 'node'
+                    WHERE id = ?
+                """, (device_name, ip_address, port, zone, hostname, now, now, speaker_id))
+            else:
+                cursor.execute("""
+                    UPDATE speakers
+                    SET ip_address = ?,
+                        port = ?,
+                        hostname = ?,
+                        status = 'online',
+                        latency_ms = 1,
+                        last_online = ?,
+                        last_checked = ?,
+                        device_type = 'node'
+                    WHERE id = ?
+                """, (ip_address, port, hostname, now, now, speaker_id))
+        else:
+            # Pendaftaran node baru otomatis
+            cursor.execute("""
+                INSERT INTO speakers (
+                    name, ip_address, port, zone, status, latency_ms,
+                    last_online, last_checked, enabled, node_id, device_type, hostname
+                )
+                VALUES (?, ?, ?, ?, 'online', 1, ?, ?, 1, ?, 'node', ?)
+            """, (device_name, ip_address, port, zone, now, now, node_id, hostname))
+            speaker_id = cursor.lastrowid
+
+        conn.commit()
+
+        cursor.execute("SELECT * FROM speakers WHERE id = ?", (speaker_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else {}
+
+def mark_stale_nodes_offline(timeout_seconds: int = 45) -> int:
+    """Menandai node PC client yang tidak mengirim heartbeat melebihi timeout menjadi offline."""
+    now = datetime.now()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, last_online FROM speakers WHERE device_type = 'node' AND status = 'online'")
+        rows = cursor.fetchall()
+        stale_ids = []
+        for r in rows:
+            last_online_str = r["last_online"]
+            if not last_online_str:
+                stale_ids.append(r["id"])
+                continue
+            try:
+                last_dt = datetime.fromisoformat(last_online_str)
+                if (now - last_dt).total_seconds() > timeout_seconds:
+                    stale_ids.append(r["id"])
+            except Exception:
+                stale_ids.append(r["id"])
+
+        if stale_ids:
+            placeholders = ",".join(["?"] * len(stale_ids))
+            cursor.execute(f"UPDATE speakers SET status = 'offline', latency_ms = 0 WHERE id IN ({placeholders})", stale_ids)
+            conn.commit()
+            return len(stale_ids)
+        return 0
+
 
 # --- ZONES CRUD ---
 def get_all_zones() -> List[Dict[str, Any]]:

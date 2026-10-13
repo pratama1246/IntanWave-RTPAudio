@@ -5,7 +5,7 @@ import {
   Siren, HardHat, Copy, History, X, Search, 
   Wifi, Activity, Check,
   Headphones, Pause,
-  Layers, Edit2, AlertTriangle, ArrowRight
+  Layers, Edit2, AlertTriangle, ArrowRight, Laptop
 } from 'lucide-react';
 
 const DAYS_CONFIG = [
@@ -689,7 +689,8 @@ export default function App() {
       name: '',
       ip_address: '',
       port: 5004,
-      zone: zonesList[0] || 'Dermaga'
+      zone: zonesList[0] || 'Dermaga',
+      device_type: 'physical'
     });
     setModalPingStatus({ testing: false, result: null });
     setShowSpeakerModal(true);
@@ -702,7 +703,8 @@ export default function App() {
       name: speaker.name,
       ip_address: speaker.ip_address,
       port: speaker.port || 5004,
-      zone: speaker.zone || 'Dermaga'
+      zone: speaker.zone || 'Dermaga',
+      device_type: speaker.device_type || 'physical'
     });
     setModalPingStatus({ testing: false, result: null });
     setShowSpeakerModal(true);
@@ -1941,11 +1943,27 @@ export default function App() {
                               <span className={`w-1.5 h-1.5 rounded-full ${
                                 isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
                               }`} />
-                              <span>{isOnline ? `${s.latency_ms || 1}ms` : 'Offline'}</span>
+                              <span>{isOnline ? (s.device_type === 'node' ? 'Online (DHCP)' : `${s.latency_ms || 1}ms`) : 'Offline'}</span>
                             </span>
                           </td>
                           <td className="py-2 px-3 font-semibold text-slate-900 whitespace-nowrap">
-                            {s.name}
+                            <div className="flex items-center gap-2">
+                              {s.device_type === 'node' ? (
+                                <span className="p-1 rounded bg-indigo-50 text-indigo-600 shrink-0" title="PC Audio Node (Windows DHCP)">
+                                  <Laptop className="w-3.5 h-3.5" />
+                                </span>
+                              ) : (
+                                <span className="p-1 rounded bg-slate-100 text-slate-500 shrink-0" title="IP Horn Speaker Fisik">
+                                  <Volume2 className="w-3.5 h-3.5" />
+                                </span>
+                              )}
+                              <div className="min-w-0">
+                                <span className="block truncate">{s.name}</span>
+                                {s.hostname && (
+                                  <span className="block text-[10px] text-slate-400 font-normal truncate">{s.hostname}</span>
+                                )}
+                              </div>
+                            </div>
                           </td>
                           <td className="py-2 px-3 whitespace-nowrap">
                             <span className="inline-block px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60">
@@ -1954,14 +1972,20 @@ export default function App() {
                           </td>
                           <td className="py-2 px-3 whitespace-nowrap">
                             <div className="inline-flex items-center gap-1 text-slate-600 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100 text-[11px]">
-                              <span>{s.ip_address}:{s.port || 5004}</span>
-                              <button
-                                onClick={() => handleCopyIp(s.id, s.ip_address)}
-                                className="text-slate-400 hover:text-blue-600 p-0.5 transition-colors cursor-pointer"
-                                title="Salin IP"
-                              >
-                                {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                              </button>
+                              <span>
+                                {s.ip_address?.startsWith('pending-') 
+                                  ? 'Menunggu DHCP...' 
+                                  : `${s.ip_address}:${s.port || 5004}`}
+                              </span>
+                              {!s.ip_address?.startsWith('pending-') && (
+                                <button
+                                  onClick={() => handleCopyIp(s.id, s.ip_address)}
+                                  className="text-slate-400 hover:text-blue-600 p-0.5 transition-colors cursor-pointer"
+                                  title="Salin IP"
+                                >
+                                  {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                                </button>
+                              )}
                             </div>
                           </td>
                           <td className="py-2 px-3 text-right pr-4 whitespace-nowrap">
