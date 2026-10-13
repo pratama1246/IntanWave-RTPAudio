@@ -485,30 +485,88 @@ export default function App() {
     }
   };
 
-  // Calculate Next Upcoming Alarm
+  // Calculate Next Upcoming Alarm based on schedule_type and days_of_week
   const getNextScheduleInfo = () => {
     const active = schedules.filter(s => s.enabled);
     if (active.length === 0) return null;
 
     const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const DAY_CODES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const DAY_LABELS_INDO = {
+      sun: 'Minggu',
+      mon: 'Senin',
+      tue: 'Selasa',
+      wed: 'Rabu',
+      thu: 'Kamis',
+      fri: 'Jumat',
+      sat: 'Sabtu'
+    };
 
-    const mapped = active.map(s => {
+    const candidates = [];
+
+    for (const s of active) {
       const parts = (s.time_str || '00:00').split(':');
       const h = parseInt(parts[0], 10) || 0;
       const m = parseInt(parts[1], 10) || 0;
-      const schedMin = h * 60 + m;
-      let diff = schedMin - currentMinutes;
-      let isTomorrow = false;
-      if (diff <= 0) {
-        diff += 24 * 60;
-        isTomorrow = true;
-      }
-      return { ...s, diff, isTomorrow };
-    });
 
-    mapped.sort((a, b) => a.diff - b.diff);
-    return mapped[0];
+      // Tentukan hari apa saja jadwal ini diizinkan berjalan
+      let allowedDays = [];
+      const stype = s.schedule_type || 'daily';
+      if (stype === 'daily') {
+        allowedDays = [...DAY_CODES];
+      } else if (stype === 'weekdays') {
+        allowedDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
+      } else if (stype === 'once') {
+        allowedDays = [...DAY_CODES];
+      } else {
+        // custom / days
+        if (s.days_of_week) {
+          allowedDays = s.days_of_week.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+        }
+        if (allowedDays.length === 0) {
+          allowedDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
+        }
+      }
+
+      // Cari waktu eksekusi terdekat (hari ini s.d. 7 hari ke depan)
+      for (let offset = 0; offset <= 7; offset++) {
+        const candidateDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, h, m, 0, 0);
+        const dayCode = DAY_CODES[candidateDate.getDay()];
+
+        if (allowedDays.includes(dayCode) && candidateDate.getTime() > now.getTime()) {
+          const diffMs = candidateDate.getTime() - now.getTime();
+          const diffMinutes = Math.floor(diffMs / 60000);
+
+          let dayLabel = 'Hari ini';
+          if (offset === 1) {
+            dayLabel = 'Besok';
+          } else if (offset > 1) {
+            dayLabel = DAY_LABELS_INDO[dayCode] || dayCode;
+          }
+
+          const days = Math.floor(diffMinutes / (24 * 60));
+          const hours = Math.floor((diffMinutes % (24 * 60)) / 60);
+          const mins = diffMinutes % 60;
+          const countdown = days > 0
+            ? `${days}h ${hours}j ${mins}m`
+            : `${hours}j ${mins}m`;
+
+          candidates.push({
+            ...s,
+            diff: diffMinutes,
+            nextDate: candidateDate,
+            dayLabel,
+            countdown,
+            isTomorrow: offset === 1
+          });
+          break; // Temukan jadwal terdekat untuk item ini
+        }
+      }
+    }
+
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a.diff - b.diff);
+    return candidates[0];
   };
 
   const nextSchedule = getNextScheduleInfo();
@@ -1369,7 +1427,7 @@ export default function App() {
                 <span className="font-semibold text-slate-700 shrink-0">Siaran berikutnya:</span>
                 {nextSchedule ? (
                   <span className="truncate text-slate-900 font-semibold">
-                    {nextSchedule.time_str} • {nextSchedule.name} {nextSchedule.isTomorrow ? 'Besok' : 'Hari ini'}
+                    {nextSchedule.time_str} • {nextSchedule.name} ({nextSchedule.dayLabel})
                   </span>
                 ) : (
                   <span className="text-slate-400">Tidak ada jadwal aktif</span>
@@ -1377,7 +1435,7 @@ export default function App() {
               </div>
               {nextSchedule && (
                 <span className="text-blue-700 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-full font-semibold shrink-0 text-[11px]">
-                  dalam {Math.floor(nextSchedule.diff / 60)}j {nextSchedule.diff % 60}m
+                  {nextSchedule.countdown}
                 </span>
               )}
             </div>
