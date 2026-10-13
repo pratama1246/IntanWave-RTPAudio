@@ -1,4 +1,5 @@
 import logging
+import zoneinfo
 from pathlib import Path
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -8,7 +9,8 @@ from app.config import DEFAULT_MULTICAST_IP, DEFAULT_MULTICAST_PORT, AUDIO_DIR
 from app.audio_engine import audio_engine
 
 logger = logging.getLogger("pa_scheduler")
-scheduler = AsyncIOScheduler()
+JAKARTA_TZ = zoneinfo.ZoneInfo("Asia/Jakarta")
+scheduler = AsyncIOScheduler(timezone=JAKARTA_TZ)
 
 async def trigger_schedule_job(schedule_id: int):
     """Fungsi yang dipanggil saat alarm scheduler jatuh tempo."""
@@ -94,16 +96,16 @@ def reload_schedules():
         stype = s["schedule_type"]
 
         if stype == "daily":
-            trigger = CronTrigger(hour=hour, minute=minute)
+            trigger = CronTrigger(hour=hour, minute=minute, timezone=JAKARTA_TZ)
         elif stype in ("weekdays", "custom", "days"):
             dow = s["days_of_week"] if "days_of_week" in s.keys() and s["days_of_week"] else None
             days = dow.strip() if dow and dow.strip() else ("mon-fri" if stype == "weekdays" else "*")
-            trigger = CronTrigger(day_of_week=days, hour=hour, minute=minute)
+            trigger = CronTrigger(day_of_week=days, hour=hour, minute=minute, timezone=JAKARTA_TZ)
         elif stype == "interval":
             hours = s["interval_hours"] or 2
-            trigger = IntervalTrigger(hours=hours)
+            trigger = IntervalTrigger(hours=hours, timezone=JAKARTA_TZ)
         elif stype == "once":
-            trigger = CronTrigger(hour=hour, minute=minute)
+            trigger = CronTrigger(hour=hour, minute=minute, timezone=JAKARTA_TZ)
 
         if trigger:
             scheduler.add_job(
