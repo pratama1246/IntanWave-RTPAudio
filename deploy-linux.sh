@@ -21,7 +21,7 @@ echo "[*] Menyiapkan direktori penyimpanan persistent..."
 git update-index --assume-unchanged backend/storage/pa_system.db 2>/dev/null || true
 git config core.filemode false 2>/dev/null || true
 mkdir -p backend/storage/audio
-chmod -R 775 backend/storage
+chmod -R 775 backend/storage 2>/dev/null || true
 
 # 3. Build & Jalankan Container via Docker Compose
 echo "[*] Membangun image Docker & menjalankan container..."
