@@ -12,6 +12,7 @@ class AudioEngine:
         self.status = "IDLE"  # IDLE, STREAMING, STOPPED
         self.current_title = ""
         self.current_file = ""
+        self.current_category = "biasa"
         self.duration = 0.0
         self.started_at = 0.0
         self.elapsed = 0.0
@@ -69,6 +70,7 @@ class AudioEngine:
             "status": self.status,
             "title": self.current_title,
             "file": self.current_file,
+            "category": self.current_category,
             "duration": round(self.duration, 1),
             "elapsed": round(self.elapsed, 1),
             "enable_multicast": self.enable_multicast,
@@ -84,7 +86,8 @@ class AudioEngine:
         enable_multicast: Optional[bool] = None, 
         enable_local: Optional[bool] = None,
         target_endpoints: Optional[List[str]] = None,
-        target_desc: Optional[str] = None
+        target_desc: Optional[str] = None,
+        category: str = "biasa"
     ):
         """
         Memulai playback ke target RTP (Multicast atau Selective Unicast via tee muxer)
@@ -112,6 +115,7 @@ class AudioEngine:
 
         self.current_title = title
         self.current_file = path_obj.name
+        self.current_category = category or "biasa"
         self.duration = self.get_audio_duration(file_path)
         self.started_at = time.time()
         self.status = "STREAMING"
@@ -229,6 +233,7 @@ class AudioEngine:
         if not self._stop_event.is_set():
             self._cleanup_processes()
             self.status = "IDLE"
+            self.current_category = "biasa"
             self.started_at = 0.0
             log_event("PLAYBACK_FINISHED", f"Selesai memutar '{self.current_title}'")
             self.notify_listeners()
@@ -239,6 +244,7 @@ class AudioEngine:
         self._cleanup_processes()
         was_streaming = (self.status == "STREAMING")
         self.status = "IDLE"
+        self.current_category = "biasa"
         self.started_at = 0.0
         self.elapsed = 0.0
         if was_streaming:

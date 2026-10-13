@@ -8,6 +8,7 @@ import threading
 import subprocess
 import shutil
 import uuid
+import re
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -85,6 +86,8 @@ class AudioReceiver:
         self.multicast_port = int(self.config.get("multicast_port", 5004))
         
         self.status = "STANDBY"  # STANDBY | STREAMING
+        self.current_category = "biasa"  # biasa | darurat
+        self.current_title = ""
         self.is_running = False
         self.on_status_change = on_status_change
         self.on_heartbeat_change = on_heartbeat_change
@@ -310,11 +313,36 @@ class AudioReceiver:
         # Jalankan di background thread agar instan tanpa nunggu/block audio
         threading.Thread(target=_do_toast, daemon=True).start()
 
-    def set_status(self, new_status):
-        if self.status != new_status:
-            self.status = new_status
-            if self.on_status_change:
-                self.on_status_change(new_status)
+    def _fetch_playback_info(self):
+        """Ambil info status siaran (kategori darurat/biasa & judul) dari server secara asinkron."""
+        if not self.server_url:
+            return
+        try:
+            url = f"{self.server_url}/api/playback"
+            req = urllib.request.Request(url, headers={"User-Agent": "IntanWaveNode/1.0"})
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    cat = data.get("category") or "biasa"
+                    title = data.get("title") or ""
+                    # Fallback heuristik jika judul mengandung kata darurat
+                    if re.search(r"siren|sirine|ews|darurat|emergency|bahaya|evakuasi", title, re.IGNORECASE):
+                        cat = "darurat"
+                    self.current_category = cat
+                    self.current_title = title
+                    if self.status == "STREAMING" and self.on_status_change:
+                        self.on_status_change("STREAMING", self.current_category, self.current_title)
+        except Exception:
+            pass
+
+    def set_status(self, new_status, category=None, title=None):
+        self.status = new_status
+        if category is not None:
+            self.current_category = category
+        if title is not None:
+            self.current_title = title
+        if self.on_status_change:
+            self.on_status_change(new_status, self.current_category, self.current_title)
 
     def start(self):
         if self.is_running:
@@ -350,6 +378,8 @@ class AudioReceiver:
                 except Exception:
                     pass
             self.player_proc = None
+        self.current_category = "biasa"
+        self.current_title = ""
         self.seen_seqs.clear()
         self.seen_seq_history.clear()
 
@@ -438,7 +468,8 @@ class AudioReceiver:
                                 "IntanWave — Siaran Masuk",
                                 f"Sedang mengudara ke {self.device_name}"
                             )
-                            self.set_status("STREAMING")
+                            self.set_status("STREAMING", "biasa", "")
+                            threading.Thread(target=self._fetch_playback_info, daemon=True).start()
 
                             vol = int(self.config.get("volume", 100))
                             vol = max(0, min(100, vol))
@@ -481,7 +512,7 @@ class AudioReceiver:
                 # Cek apakah aliran paket berhenti > 1.2 detik
                 if self.status == "STREAMING" and (time.time() - self.last_packet_time > 1.2):
                     self._close_player()
-                    self.set_status("STANDBY")
+                    self.set_status("STANDBY", "biasa", "")
 
             except Exception:
                 time.sleep(0.1)

@@ -144,6 +144,30 @@ class IntanWaveNodeWindow:
 
         ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 10))
 
+        # --- COLOR BAR STREAMING (STATUS INDIKATOR AUDIO) ---
+        # Biru untuk Biasa (#2563eb), Merah untuk Darurat (#dc2626), Abu-abu untuk Standby (#f1f5f9)
+        self.bar_frame = tk.Frame(main_frame, bg="#f1f5f9", padx=10, pady=7, highlightthickness=1, highlightbackground="#e2e8f0")
+        self.bar_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.lbl_bar_icon = tk.Label(
+            self.bar_frame, 
+            text="⚪", 
+            font=("Segoe UI", 10), 
+            bg="#f1f5f9", 
+            fg="#64748b"
+        )
+        self.lbl_bar_icon.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.lbl_bar_text = tk.Label(
+            self.bar_frame, 
+            text="Standby • Menunggu Siaran", 
+            font=("Segoe UI", 9, "bold"), 
+            bg="#f1f5f9", 
+            fg="#64748b",
+            anchor=tk.W
+        )
+        self.lbl_bar_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         # 2. Form Server & Node Identity
         srv_frame = ttk.LabelFrame(main_frame, text=" Server & Identitas Node ", padding="12 10 12 10")
         srv_frame.pack(fill=tk.X, pady=(0, 10))
@@ -276,14 +300,33 @@ class IntanWaveNodeWindow:
                 )
         self.root.after(0, _apply)
 
-    def update_status(self, status: str):
-        """Thread-safe status update callback dari receiver."""
+    def update_status(self, status: str, category: str = "biasa", title: str = ""):
+        """Thread-safe status update callback dari receiver dengan color bar visual."""
         def _apply():
             if status == "STREAMING":
-                self.root.title("IntanWave Node [STREAMING]")
+                is_emergency = (category == "darurat")
+                bg_color = "#dc2626" if is_emergency else "#2563eb"
+                border_color = "#b91c1c" if is_emergency else "#1d4ed8"
+                fg_color = "#ffffff"
+                icon = "🚨" if is_emergency else "🔊"
+                disp_title = f": {title}" if title else ""
+                bar_text = f"SIARAN DARURAT{disp_title}" if is_emergency else f"SEDANG MENERIMA SIARAN{disp_title}"
+
+                self.bar_frame.config(bg=bg_color, highlightbackground=border_color)
+                self.lbl_bar_icon.config(text=icon, bg=bg_color, fg=fg_color)
+                self.lbl_bar_text.config(text=bar_text, bg=bg_color, fg=fg_color)
+
+                self.root.title(f"IntanWave Node [{'DARURAT' if is_emergency else 'STREAMING'}]")
                 if self.tray_icon:
-                    self.tray_icon.title = "IntanWave Node — SEDANG SIARAN"
+                    self.tray_icon.title = f"IntanWave Node — {'SIARAN DARURAT' if is_emergency else 'SEDANG SIARAN'}"
+
+                # Bawa jendela ke depan jika darurat agar operator langsung melihat
+                if is_emergency:
+                    self.show_window()
             else:
+                self.bar_frame.config(bg="#f1f5f9", highlightbackground="#e2e8f0")
+                self.lbl_bar_icon.config(text="⚪", bg="#f1f5f9", fg="#64748b")
+                self.lbl_bar_text.config(text="Standby • Menunggu Siaran", bg="#f1f5f9", fg="#64748b")
                 self.root.title("IntanWave Node")
                 if self.tray_icon:
                     self.tray_icon.title = "IntanWave Node — Standby"

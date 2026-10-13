@@ -16,7 +16,7 @@ async def trigger_schedule_job(schedule_id: int):
     """Fungsi yang dipanggil saat alarm scheduler jatuh tempo."""
     with get_db() as conn:
         row = conn.execute("""
-            SELECT s.*, a.file_path, a.display_name, a.filename 
+            SELECT s.*, a.file_path, a.display_name, a.filename, a.category 
             FROM schedules s
             JOIN audio_files a ON s.audio_file_id = a.id
             WHERE s.id = ? AND s.enabled = 1
@@ -71,13 +71,15 @@ async def trigger_schedule_job(schedule_id: int):
                 target_endpoints.append(f"{mc_ip}:{mc_port}")
                 target_desc = f"Semua Speaker ({len(sp_rows)} Speaker & Multicast)"
 
+        cat = row["category"] if "category" in row.keys() else "biasa"
         audio_engine.play(
             file_path=str(fpath.resolve()),
             title=f"[Jadwal] {row['name']}",
             enable_multicast=bool(row["target_multicast"]),
             enable_local=bool(row["target_local"]),
             target_endpoints=target_endpoints,
-            target_desc=target_desc
+            target_desc=target_desc,
+            category=cat
         )
     except Exception as e:
         log_event("SCHEDULE_ERROR", f"Gagal mengeksekusi jadwal '{row['name']}': {e}", level="ERROR")

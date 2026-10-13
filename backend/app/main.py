@@ -342,13 +342,15 @@ def play_audio(req: PlayRequest):
             target_desc = f"Semua Speaker ({len(rows)} Speaker & Multicast)"
 
     try:
+        cat = row["category"] if "category" in row.keys() else "biasa"
         audio_engine.play(
             file_path=str(audio_path.resolve()),
             title=row["display_name"],
             enable_multicast=req.enable_multicast,
             enable_local=req.enable_local,
             target_endpoints=target_endpoints,
-            target_desc=target_desc
+            target_desc=target_desc,
+            category=cat
         )
         return {"message": "Siaran dimulai", "status": audio_engine.get_status()}
     except Exception as e:
