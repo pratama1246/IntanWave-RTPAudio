@@ -165,7 +165,7 @@ export default function App() {
 
   // Broadcast Target Selection State
   const [targetMode, setTargetMode] = useState('all'); // 'all', 'zone', 'speaker'
-  const [selectedZone, setSelectedZone] = useState('Dermaga');
+  const [selectedZone, setSelectedZone] = useState('Kantor');
   const [selectedSpeakerId, setSelectedSpeakerId] = useState(null);
   const [selectedSpeakerIds, setSelectedSpeakerIds] = useState([]);
 
@@ -213,7 +213,7 @@ export default function App() {
     name: '',
     ip_address: '',
     port: 5004,
-    zone: 'Dermaga'
+    zone: 'Kantor'
   });
   const [modalPingStatus, setModalPingStatus] = useState({ testing: false, result: null });
 
@@ -381,9 +381,6 @@ export default function App() {
     const set = new Set();
     zones.forEach(z => z && z.name && set.add(z.name.trim()));
     speakers.forEach(s => s && s.zone && set.add(s.zone.trim()));
-    if (!set.has('Dermaga')) set.add('Dermaga');
-    if (!set.has('Lapangan & Gudang')) set.add('Lapangan & Gudang');
-    if (!set.has('Kantor & Kontrol')) set.add('Kantor & Kontrol');
     return Array.from(set).filter(Boolean);
   }, [zones, speakers]);
 
@@ -445,23 +442,32 @@ export default function App() {
     return 'Semua Speaker';
   }, [targetMode, selectedZone, selectedSpeakerId, speakers, onlineCount, zonesList]);
 
-  // Direct Target Options: Semua Speaker, Zona 1: Dermaga, Zona 2: ..., Speaker ... (Kustom dihapus)
+  // Direct Target Options: Hanya menampilkan Semua Speaker, Zona yang memiliki speaker terdaftar, dan Speaker tunggal
   const targetOptions = useMemo(() => {
     const list = [
       { value: 'all', label: 'Semua Speaker' }
     ];
-    zonesList.forEach((z, idx) => {
+
+    // Hanya tampilkan zona yang benar-benar memiliki speaker terdaftar!
+    const activeZonesWithSpeakers = zonesList.filter(z => 
+      speakers.some(s => (s.zone || '').trim().toLowerCase() === z.trim().toLowerCase())
+    );
+
+    activeZonesWithSpeakers.forEach((z, idx) => {
+      const spkCount = speakers.filter(s => (s.zone || '').trim().toLowerCase() === z.trim().toLowerCase()).length;
       list.push({
         value: `zone:${z}`,
-        label: `Zona ${idx + 1}: ${z}`
+        label: `Zona ${idx + 1}: ${z} (${spkCount} Speaker)`
       });
     });
+
     speakers.forEach((s) => {
       list.push({
         value: `speaker:${s.id}`,
         label: `Speaker: ${s.name} (${s.ip_address})`
       });
     });
+
     return list;
   }, [zonesList, speakers]);
 
