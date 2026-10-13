@@ -29,6 +29,16 @@ services:
       retries: 3
       start_period: 10s
 
+    # Pembatasan Memori Maksimal 150MB
+    mem_limit: 150m
+    mem_reservation: 64m
+    deploy:
+      resources:
+        limits:
+          memory: 150M
+        reservations:
+          memory: 64M
+
     logging:
       driver: "json-file"
       options:
