@@ -78,6 +78,11 @@ class AudioReceiver:
         self.sock = None
         self.thread = None
         self.last_toast_time = 0
+        
+        # RTP Sequence Number Deduplication (Mencegah gema/suara dobel)
+        self.seen_seqs = set()
+        self.seen_seq_history = []
+        self.max_history = 512
 
     def load_config(self):
         if CONFIG_FILE.exists():
@@ -189,6 +194,8 @@ class AudioReceiver:
                 except Exception:
                     pass
             self.player_proc = None
+        self.seen_seqs.clear()
+        self.seen_seq_history.clear()
 
     def _run_loop(self):
         """Loop utama background mendengarkan paket RTP Multicast atau Unicast."""
@@ -247,6 +254,19 @@ class AudioReceiver:
                     b0 = data[0]
                     cc = b0 & 0x0F
                     x_bit = (b0 >> 4) & 0x01
+                    seq_num = struct.unpack("!H", data[2:4])[0]
+
+                    # Deduplikasi RTP: abaikan paket jika seq_num sudah pernah diproses baru-baru ini
+                    # Mencegah echo/gema akibat paket ganda (Unicast + Multicast bersamaan)
+                    if seq_num in self.seen_seqs:
+                        continue
+
+                    self.seen_seqs.add(seq_num)
+                    self.seen_seq_history.append(seq_num)
+                    if len(self.seen_seq_history) > self.max_history:
+                        oldest = self.seen_seq_history.pop(0)
+                        self.seen_seqs.discard(oldest)
+
                     offset = 12 + (cc * 4)
                     if x_bit and len(data) >= offset + 4:
                         ext_len = struct.unpack("!H", data[offset + 2:offset + 4])[0]
@@ -279,6 +299,7 @@ class AudioReceiver:
                                 "-volume", str(vol),
                                 "-f", "alaw",
                                 "-ar", "8000",
+                                "-ac", "1",
                                 "-i", "-"
                             ]
                             self.player_proc = subprocess.Popen(
