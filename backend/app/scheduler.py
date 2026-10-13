@@ -1,9 +1,10 @@
 import logging
+from pathlib import Path
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from app.database import get_db, log_event, get_settings
-from app.config import DEFAULT_MULTICAST_IP, DEFAULT_MULTICAST_PORT
+from app.config import DEFAULT_MULTICAST_IP, DEFAULT_MULTICAST_PORT, AUDIO_DIR
 from app.audio_engine import audio_engine
 
 logger = logging.getLogger("pa_scheduler")
@@ -13,7 +14,7 @@ async def trigger_schedule_job(schedule_id: int):
     """Fungsi yang dipanggil saat alarm scheduler jatuh tempo."""
     with get_db() as conn:
         row = conn.execute("""
-            SELECT s.*, a.file_path, a.display_name 
+            SELECT s.*, a.file_path, a.display_name, a.filename 
             FROM schedules s
             JOIN audio_files a ON s.audio_file_id = a.id
             WHERE s.id = ? AND s.enabled = 1
@@ -21,6 +22,16 @@ async def trigger_schedule_job(schedule_id: int):
 
     if not row:
         return
+
+    # Pastikan file path valid lintas platform (Linux Docker vs Windows Host)
+    fpath = AUDIO_DIR / row["filename"]
+    if not fpath.exists():
+        stored_path = Path(row["file_path"])
+        if stored_path.exists():
+            fpath = stored_path
+        else:
+            log_event("SCHEDULE_ERROR", f"Berkas fisik '{row['filename']}' tidak ditemukan di storage", level="ERROR")
+            return
 
     log_event("SCHEDULE_TRIGGERED", f"Memutar jadwal otomatis: '{row['name']}' ({row['display_name']})")
     try:
@@ -54,7 +65,7 @@ async def trigger_schedule_job(schedule_id: int):
                 target_desc = f"Semua Speaker ({len(sp_rows)} Speaker & Multicast)"
 
         audio_engine.play(
-            file_path=row["file_path"],
+            file_path=str(fpath.resolve()),
             title=f"[Jadwal] {row['name']}",
             enable_multicast=bool(row["target_multicast"]),
             enable_local=bool(row["target_local"]),

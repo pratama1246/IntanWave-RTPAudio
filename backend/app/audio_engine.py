@@ -28,6 +28,11 @@ class AudioEngine:
     def get_audio_duration(self, file_path: str) -> float:
         """Mengambil durasi file audio menggunakan ffprobe."""
         try:
+            path_obj = Path(file_path)
+            if not path_obj.exists():
+                alt = AUDIO_DIR / path_obj.name
+                if alt.exists():
+                    file_path = str(alt.resolve())
             cmd = [
                 "ffprobe", "-v", "error",
                 "-show_entries", "format=duration",
@@ -89,8 +94,13 @@ class AudioEngine:
 
         path_obj = Path(file_path)
         if not path_obj.exists():
-            log_event("PLAYBACK_ERROR", f"File tidak ditemukan: {file_path}", level="ERROR")
-            raise FileNotFoundError(f"File {file_path} tidak ditemukan")
+            # Robust fallback jika file_path berupa path host OS lain (misal D:\... di Linux container)
+            alt_path = AUDIO_DIR / path_obj.name
+            if alt_path.exists():
+                path_obj = alt_path
+            else:
+                log_event("PLAYBACK_ERROR", f"File tidak ditemukan: {file_path} (maupun di {AUDIO_DIR})", level="ERROR")
+                raise FileNotFoundError(f"File audio '{path_obj.name}' tidak ditemukan di storage server")
 
         settings = get_settings()
         mc_ip = settings.get("multicast_ip", DEFAULT_MULTICAST_IP)

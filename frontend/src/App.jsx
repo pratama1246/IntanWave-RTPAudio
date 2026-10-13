@@ -527,11 +527,15 @@ export default function App() {
     handleStopBrowserPreview();
     try {
       const payload = { audio_id: audioId, enable_local: false, ...buildTargetPayload() };
-      await fetch('/api/play', {
+      const res = await fetch('/api/play', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        alert('Gagal menyiarkan audio: ' + (errData.detail || res.statusText || 'Server Error'));
+      }
       fetchData();
     } catch (err) {
       alert('Gagal menyiarkan audio: ' + err);
@@ -543,11 +547,15 @@ export default function App() {
     handleStopBrowserPreview();
     try {
       const payload = { filename, enable_local: false, ...buildTargetPayload() };
-      await fetch('/api/play', {
+      const res = await fetch('/api/play', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        alert('Gagal menyiarkan ke speaker: ' + (errData.detail || res.statusText || 'Server Error'));
+      }
       fetchData();
     } catch (err) {
       alert('Gagal menyiarkan ke speaker: ' + err);

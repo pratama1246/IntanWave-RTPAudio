@@ -106,15 +106,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def resolve_audio_file(filename: str, fallback_path: Optional[str] = None) -> Path:
+    r"""
+    Mengembalikan Path file audio yang valid secara portabel lintas OS & Docker container.
+    Mencegah bug path absolut beda OS (misal D:\... dari Windows host yang terbawa ke Linux container).
+    """
+    fpath = AUDIO_DIR / filename
+    if fpath.is_file():
+        return fpath
+    if fallback_path:
+        fb = Path(fallback_path)
+        if fb.is_file():
+            return fb
+        alt = AUDIO_DIR / fb.name
+        if alt.is_file():
+            return alt
+    return fpath
+
 def sync_audio_files_to_db():
-    """Memindai folder audio dan mendaftarkan file yang belum tercatat."""
+    """Memindai folder audio dan mendaftarkan file yang belum tercatat atau sinkronisasi path."""
     valid_exts = {".wav", ".mp3", ".ogg", ".flac"}
     with get_db() as conn:
         for f in AUDIO_DIR.glob("*"):
             if f.suffix.lower() in valid_exts and f.is_file():
                 existing = conn.execute("SELECT id FROM audio_files WHERE filename = ?", (f.name,)).fetchone()
+                duration = audio_engine.get_audio_duration(str(f))
                 if not existing:
-                    duration = audio_engine.get_audio_duration(str(f))
                     name = f.stem.replace("_", " ").title()
                     lname = f.name.lower()
                     cat = "darurat" if any(k in lname for k in ["siren", "sirine", "ews", "emergency", "bahaya", "evakuasi"]) else "biasa"
@@ -122,6 +139,13 @@ def sync_audio_files_to_db():
                         INSERT INTO audio_files (filename, display_name, file_path, format, duration, size, category)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, (f.name, name, str(f.resolve()), f.suffix.lower()[1:], duration, f.stat().st_size, cat))
+                else:
+                    # Selalu sinkronkan file_path dan size agar sesuai dengan direktori aktif di OS/Container saat ini
+                    conn.execute("""
+                        UPDATE audio_files 
+                        SET file_path = ?, size = ?, duration = CASE WHEN duration <= 0 THEN ? ELSE duration END
+                        WHERE id = ?
+                    """, (str(f.resolve()), f.stat().st_size, duration, existing["id"]))
         conn.commit()
 
 # --- WEBSOCKET ---
@@ -209,7 +233,7 @@ def delete_audio(audio_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Audio tidak ditemukan")
 
-        fpath = Path(row["file_path"])
+        fpath = resolve_audio_file(row["filename"], row["file_path"])
         if fpath.exists():
             try:
                 fpath.unlink()
@@ -228,7 +252,7 @@ def stream_audio(audio_id: int):
         row = conn.execute("SELECT * FROM audio_files WHERE id = ?", (audio_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Audio tidak ditemukan")
-        fpath = Path(row["file_path"])
+        fpath = resolve_audio_file(row["filename"], row["file_path"])
         if not fpath.exists():
             raise HTTPException(status_code=404, detail="Berkas fisik tidak ditemukan")
         fmt = row["format"].lower()
@@ -268,6 +292,11 @@ def play_audio(req: PlayRequest):
     if not row:
         raise HTTPException(status_code=404, detail="File audio tidak ditemukan")
 
+    # Pastikan file audio valid lintas platform (mengatasi path Windows absolut di Linux Docker)
+    audio_path = resolve_audio_file(row["filename"], row["file_path"])
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail=f"Berkas fisik audio '{row['filename']}' tidak ditemukan di storage server")
+
     target_endpoints = None
     target_desc = "Semua Speaker"
 
@@ -303,7 +332,7 @@ def play_audio(req: PlayRequest):
 
     try:
         audio_engine.play(
-            file_path=row["file_path"],
+            file_path=str(audio_path.resolve()),
             title=row["display_name"],
             enable_multicast=req.enable_multicast,
             enable_local=req.enable_local,

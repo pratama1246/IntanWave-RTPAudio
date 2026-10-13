@@ -144,6 +144,13 @@ def init_db():
                OR LOWER(filename) LIKE '%evakuasi%'
         """)
 
+        # Pastikan tidak ada path Windows absolut yang tertinggal dari migrasi database
+        cursor.execute("""
+            UPDATE audio_files 
+            SET file_path = filename 
+            WHERE file_path LIKE 'C:%' OR file_path LIKE 'D:%' OR file_path LIKE '%\\%'
+        """)
+
         conn.commit()
 
     # Pre-seed default speakers if table is empty
