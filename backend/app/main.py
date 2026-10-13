@@ -358,14 +358,14 @@ class SpeakerCreate(BaseModel):
     name: str
     ip_address: str
     port: int = 5004
-    zone: str = "Dermaga"
+    zone: str = "Kantor"
     device_type: Optional[str] = "physical"
 
 class SpeakerUpdate(BaseModel):
     name: str
     ip_address: str
     port: int = 5004
-    zone: str = "Dermaga"
+    zone: str = "Kantor"
     enabled: int = 1
     device_type: Optional[str] = "physical"
 

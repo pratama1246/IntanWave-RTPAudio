@@ -689,7 +689,7 @@ export default function App() {
       name: '',
       ip_address: '',
       port: 5004,
-      zone: zonesList[0] || 'Dermaga',
+      zone: zonesList[0] || 'Kantor',
       device_type: 'physical'
     });
     setModalPingStatus({ testing: false, result: null });
@@ -1967,7 +1967,7 @@ export default function App() {
                           </td>
                           <td className="py-2 px-3 whitespace-nowrap">
                             <span className="inline-block px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60">
-                              {s.zone || 'Dermaga'}
+                              {s.zone || 'Kantor'}
                             </span>
                           </td>
                           <td className="py-2 px-3 whitespace-nowrap">

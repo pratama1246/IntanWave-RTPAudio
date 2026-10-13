@@ -80,10 +80,6 @@ def init_db():
             INSERT OR IGNORE INTO zones (name)
             SELECT DISTINCT zone FROM speakers WHERE zone IS NOT NULL AND TRIM(zone) != ''
         """)
-        cursor.execute("""
-            INSERT OR IGNORE INTO zones (name)
-            VALUES ('Dermaga'), ('Lapangan & Gudang'), ('Kantor & Kontrol')
-        """)
 
         # Settings
         cursor.execute("""
@@ -198,8 +194,8 @@ def get_speaker_by_id(speaker_id: int) -> Optional[Dict[str, Any]]:
         row = conn.execute("SELECT * FROM speakers WHERE id = ?", (speaker_id,)).fetchone()
         return dict(row) if row else None
 
-def create_speaker(name: str, ip_address: str, port: int = 5004, zone: str = "Dermaga", device_type: str = "physical") -> int:
-    zone = (zone or "Dermaga").strip()
+def create_speaker(name: str, ip_address: str, port: int = 5004, zone: str = "Kantor", device_type: str = "physical") -> int:
+    zone = (zone or "Kantor").strip()
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (zone,))
@@ -211,7 +207,7 @@ def create_speaker(name: str, ip_address: str, port: int = 5004, zone: str = "De
         return cursor.lastrowid
 
 def update_speaker(speaker_id: int, name: str, ip_address: str, port: int, zone: str, enabled: int = 1):
-    zone = (zone or "Dermaga").strip()
+    zone = (zone or "Kantor").strip()
     with get_db() as conn:
         conn.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (zone,))
         conn.execute("""
@@ -261,7 +257,7 @@ def upsert_node_heartbeat(
     if not node_id:
         raise ValueError("node_id tidak boleh kosong")
 
-    zone = (zone or "Kantor & Kontrol").strip()
+    zone = (zone or "Kantor").strip()
     device_name = (device_name or f"PC Audio ({hostname or node_id})").strip()
     now = datetime.now().isoformat()
 
@@ -405,9 +401,13 @@ def update_zone(old_name: str, new_name: str, description: Optional[str] = None)
 def delete_zone(name: str):
     name = name.strip()
     with get_db() as conn:
-        conn.execute("DELETE FROM zones WHERE name = ?", (name,))
-        # Set speaker di zona ini ke 'Umum'
-        conn.execute("INSERT OR IGNORE INTO zones (name) VALUES ('Umum')")
-        conn.execute("UPDATE speakers SET zone = 'Umum' WHERE zone = ?", (name,))
-        conn.execute("UPDATE schedules SET target_zone = 'Umum' WHERE target_zone = ?", (name,))
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM zones WHERE name = ?", (name,))
+        # Hanya jika ada speaker di zona ini, pindahkan ke 'Umum'
+        cursor.execute("SELECT COUNT(*) FROM speakers WHERE zone = ?", (name,))
+        count = cursor.fetchone()[0]
+        if count > 0:
+            cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES ('Umum')")
+            cursor.execute("UPDATE speakers SET zone = 'Umum' WHERE zone = ?", (name,))
+            cursor.execute("UPDATE schedules SET target_zone = 'Umum' WHERE target_zone = ?", (name,))
         conn.commit()
