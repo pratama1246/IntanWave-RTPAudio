@@ -2,7 +2,10 @@
   "server_url": "http://10.183.55.114:7080",
   "node_id": "node_client_01",
   "device_name": "Terminal Audio Node (Amplifier)",
-  "zone": "Kantor & Kontrol",
+  "groups": [
+    "Kantor"
+  ],
+  "zone": "Kantor",
   "multicast_ip": "239.255.0.1",
   "multicast_port": 5004,
   "enable_toast": true,

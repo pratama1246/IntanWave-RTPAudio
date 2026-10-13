@@ -1,7 +1,50 @@
 import sqlite3
+import json
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from app.config import DB_PATH
+
+def parse_groups(val: Any) -> List[str]:
+    """Helper konversi string/list/json ke List[str] nama group yang unik dan bersih."""
+    if not val:
+        return []
+    items = []
+    if isinstance(val, (list, tuple, set)):
+        for x in val:
+            if isinstance(x, str):
+                items.extend([p.strip() for p in x.split(",") if p.strip()])
+            elif x:
+                items.append(str(x).strip())
+    elif isinstance(val, str):
+        v = val.strip()
+        if not v:
+            return []
+        if v.startswith("[") and v.endswith("]"):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    for x in parsed:
+                        if isinstance(x, str):
+                            items.extend([p.strip() for p in x.split(",") if p.strip()])
+                        elif x:
+                            items.append(str(x).strip())
+                else:
+                    items.extend([p.strip() for p in str(parsed).split(",") if p.strip()])
+            except Exception:
+                items.extend([x.strip() for x in v.strip("[]").split(",") if x.strip()])
+        else:
+            items.extend([x.strip() for x in v.split(",") if x.strip()])
+    else:
+        items.append(str(val).strip())
+
+    seen = set()
+    result = []
+    for it in items:
+        clean = it.strip('"\' ')
+        if clean and clean not in seen:
+            seen.add(clean)
+            result.append(clean)
+    return result
 
 def get_db():
     conn = sqlite3.connect(str(DB_PATH))
@@ -65,9 +108,19 @@ def init_db():
             )
         """)
 
-        # Zones Table
+        # Zones Table (Legacy Support)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS zones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Groups Table (Multi-group support)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 description TEXT DEFAULT '',
@@ -79,6 +132,12 @@ def init_db():
         cursor.execute("""
             INSERT OR IGNORE INTO zones (name)
             SELECT DISTINCT zone FROM speakers WHERE zone IS NOT NULL AND TRIM(zone) != ''
+        """)
+
+        # Sync existing zones into groups
+        cursor.execute("""
+            INSERT OR IGNORE INTO groups (name, description, created_at)
+            SELECT name, description, created_at FROM zones
         """)
 
         # Settings
@@ -117,10 +176,18 @@ def init_db():
             cursor.execute("ALTER TABLE schedules ADD COLUMN target_mode TEXT DEFAULT 'all'")
         if "target_zone" not in sched_cols:
             cursor.execute("ALTER TABLE schedules ADD COLUMN target_zone TEXT DEFAULT ''")
+        if "target_group" not in sched_cols:
+            cursor.execute("ALTER TABLE schedules ADD COLUMN target_group TEXT DEFAULT ''")
+        cursor.execute("""
+            UPDATE schedules 
+            SET target_group = target_zone 
+            WHERE (target_group IS NULL OR target_group = '') AND target_zone IS NOT NULL AND target_zone != ''
+        """)
         if "target_speaker_id" not in sched_cols:
             cursor.execute("ALTER TABLE schedules ADD COLUMN target_speaker_id INTEGER DEFAULT 0")
         if "target_speakers" not in sched_cols:
             cursor.execute("ALTER TABLE schedules ADD COLUMN target_speakers TEXT DEFAULT ''")
+
         # Migrations for audio_files table
         audio_cols = [c[1] for c in cursor.execute("PRAGMA table_info(audio_files)").fetchall()]
         if "category" not in audio_cols:
@@ -134,7 +201,20 @@ def init_db():
             cursor.execute("ALTER TABLE speakers ADD COLUMN device_type TEXT DEFAULT 'physical'")
         if "hostname" not in speaker_cols:
             cursor.execute("ALTER TABLE speakers ADD COLUMN hostname TEXT DEFAULT ''")
+        if "groups" not in speaker_cols:
+            cursor.execute("ALTER TABLE speakers ADD COLUMN groups TEXT DEFAULT '[]'")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_speakers_node_id ON speakers(node_id) WHERE node_id IS NOT NULL")
+
+        # Pastikan kolom groups terisi dari zone jika ada speaker lama
+        sp_rows = cursor.execute("SELECT id, zone, groups FROM speakers").fetchall()
+        for sp in sp_rows:
+            curr_grps = parse_groups(sp["groups"])
+            if not curr_grps and sp["zone"] and sp["zone"].strip():
+                new_grps = [sp["zone"].strip()]
+                cursor.execute(
+                    "UPDATE speakers SET groups = ? WHERE id = ?",
+                    (json.dumps(new_grps), sp["id"])
+                )
 
         # Ensure siren / ews files are tagged as 'darurat'
         cursor.execute("""
@@ -186,35 +266,76 @@ def update_settings(settings_dict: Dict[str, str]):
 
 def get_all_speakers() -> List[Dict[str, Any]]:
     with get_db() as conn:
-        rows = conn.execute("SELECT * FROM speakers ORDER BY zone ASC, name ASC").fetchall()
-        return [dict(r) for r in rows]
+        rows = conn.execute("SELECT * FROM speakers ORDER BY name ASC").fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["groups"] = parse_groups(d.get("groups") or d.get("zone"))
+            d["zone"] = d["groups"][0] if d["groups"] else (d.get("zone") or "")
+            result.append(d)
+        return result
 
 def get_speaker_by_id(speaker_id: int) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
         row = conn.execute("SELECT * FROM speakers WHERE id = ?", (speaker_id,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        d["groups"] = parse_groups(d.get("groups") or d.get("zone"))
+        d["zone"] = d["groups"][0] if d["groups"] else (d.get("zone") or "")
+        return d
 
-def create_speaker(name: str, ip_address: str, port: int = 5004, zone: str = "Kantor", device_type: str = "physical") -> int:
-    zone = (zone or "Kantor").strip()
+def create_speaker(
+    name: str, 
+    ip_address: str, 
+    port: int = 5004, 
+    groups: Any = None, 
+    zone: str = "Kantor", 
+    device_type: str = "physical"
+) -> int:
+    grp_list = parse_groups(groups) if groups is not None else parse_groups(zone)
+    if not grp_list:
+        grp_list = ["Kantor"]
+    primary_group = grp_list[0]
+    grp_json = json.dumps(grp_list)
+
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (zone,))
+        for g in grp_list:
+            cursor.execute("INSERT OR IGNORE INTO groups (name) VALUES (?)", (g,))
+            cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (g,))
         cursor.execute("""
-            INSERT INTO speakers (name, ip_address, port, zone, status, device_type)
-            VALUES (?, ?, ?, ?, 'unknown', ?)
-        """, (name, ip_address, port, zone, device_type))
+            INSERT INTO speakers (name, ip_address, port, zone, groups, status, device_type)
+            VALUES (?, ?, ?, ?, ?, 'unknown', ?)
+        """, (name, ip_address, port, primary_group, grp_json, device_type))
         conn.commit()
         return cursor.lastrowid
 
-def update_speaker(speaker_id: int, name: str, ip_address: str, port: int, zone: str, enabled: int = 1):
-    zone = (zone or "Kantor").strip()
+def update_speaker(
+    speaker_id: int, 
+    name: str, 
+    ip_address: str, 
+    port: int, 
+    groups: Any = None, 
+    zone: str = "Kantor", 
+    enabled: int = 1
+):
+    grp_list = parse_groups(groups) if groups is not None else parse_groups(zone)
+    if not grp_list:
+        grp_list = ["Kantor"]
+    primary_group = grp_list[0]
+    grp_json = json.dumps(grp_list)
+
     with get_db() as conn:
-        conn.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (zone,))
-        conn.execute("""
+        cursor = conn.cursor()
+        for g in grp_list:
+            cursor.execute("INSERT OR IGNORE INTO groups (name) VALUES (?)", (g,))
+            cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (g,))
+        cursor.execute("""
             UPDATE speakers 
-            SET name = ?, ip_address = ?, port = ?, zone = ?, enabled = ?
+            SET name = ?, ip_address = ?, port = ?, zone = ?, groups = ?, enabled = ?
             WHERE id = ?
-        """, (name, ip_address, port, zone, enabled, speaker_id))
+        """, (name, ip_address, port, primary_group, grp_json, enabled, speaker_id))
         conn.commit()
 
 def delete_speaker(speaker_id: int):
@@ -243,32 +364,39 @@ def update_speaker_status(speaker_id: int, status: str, latency_ms: int = 0):
 def upsert_node_heartbeat(
     node_id: str,
     device_name: str,
-    zone: str,
-    ip_address: str,
+    zone: str = "Kantor",
+    groups: Any = None,
+    ip_address: str = "",
     port: int = 5004,
     hostname: str = "",
     force_update: bool = False
 ) -> Dict[str, Any]:
     """
     Mendaftarkan atau memperbarui status node client PC Windows secara dinamis.
-    Menangani perubahan IP akibat DHCP secara transparan tanpa benturan SQLite UNIQUE constraint.
+    Mendukung multi-group, perubahan IP akibat DHCP tanpa benturan SQLite UNIQUE constraint.
     """
     node_id = (node_id or "").strip()
     if not node_id:
         raise ValueError("node_id tidak boleh kosong")
 
-    zone = (zone or "Kantor").strip()
+    grp_list = parse_groups(groups) if groups is not None else parse_groups(zone)
+    if not grp_list:
+        grp_list = ["Kantor"]
+    primary_group = grp_list[0]
+    grp_json = json.dumps(grp_list)
+
     device_name = (device_name or f"PC Audio ({hostname or node_id})").strip()
     now = datetime.now().isoformat()
 
     with get_db() as conn:
         cursor = conn.cursor()
 
-        # 1. Pastikan zona terdaftar
-        cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (zone,))
+        # 1. Pastikan setiap group terdaftar
+        for g in grp_list:
+            cursor.execute("INSERT OR IGNORE INTO groups (name) VALUES (?)", (g,))
+            cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (g,))
 
         # 2. Tangani benturan IP jika IP ini pernah dipegang oleh record lain
-        # (misal lease IP DHCP berpindah dari perangkat lama ke node ini)
         cursor.execute(
             "SELECT id, node_id, name FROM speakers WHERE ip_address = ? AND (node_id IS NULL OR node_id != ?)",
             (ip_address, node_id)
@@ -287,7 +415,6 @@ def upsert_node_heartbeat(
 
         if existing:
             speaker_id = existing["id"]
-            # Jika force_update = True (dari pengaturan GUI client), update juga nama dan zona
             if force_update:
                 cursor.execute("""
                     UPDATE speakers
@@ -295,6 +422,7 @@ def upsert_node_heartbeat(
                         ip_address = ?,
                         port = ?,
                         zone = ?,
+                        groups = ?,
                         hostname = ?,
                         status = 'online',
                         latency_ms = 1,
@@ -302,7 +430,7 @@ def upsert_node_heartbeat(
                         last_checked = ?,
                         device_type = 'node'
                     WHERE id = ?
-                """, (device_name, ip_address, port, zone, hostname, now, now, speaker_id))
+                """, (device_name, ip_address, port, primary_group, grp_json, hostname, now, now, speaker_id))
             else:
                 cursor.execute("""
                     UPDATE speakers
@@ -317,21 +445,25 @@ def upsert_node_heartbeat(
                     WHERE id = ?
                 """, (ip_address, port, hostname, now, now, speaker_id))
         else:
-            # Pendaftaran node baru otomatis
             cursor.execute("""
                 INSERT INTO speakers (
-                    name, ip_address, port, zone, status, latency_ms,
+                    name, ip_address, port, zone, groups, status, latency_ms,
                     last_online, last_checked, enabled, node_id, device_type, hostname
                 )
-                VALUES (?, ?, ?, ?, 'online', 1, ?, ?, 1, ?, 'node', ?)
-            """, (device_name, ip_address, port, zone, now, now, node_id, hostname))
+                VALUES (?, ?, ?, ?, ?, 'online', 1, ?, ?, 1, ?, 'node', ?)
+            """, (device_name, ip_address, port, primary_group, grp_json, now, now, node_id, hostname))
             speaker_id = cursor.lastrowid
 
         conn.commit()
 
         cursor.execute("SELECT * FROM speakers WHERE id = ?", (speaker_id,))
         row = cursor.fetchone()
-        return dict(row) if row else {}
+        if not row:
+            return {}
+        d = dict(row)
+        d["groups"] = parse_groups(d.get("groups") or d.get("zone"))
+        d["zone"] = d["groups"][0] if d["groups"] else (d.get("zone") or "")
+        return d
 
 def mark_stale_nodes_offline(timeout_seconds: int = 45) -> int:
     """Menandai node PC client yang tidak mengirim heartbeat melebihi timeout menjadi offline."""
@@ -360,54 +492,94 @@ def mark_stale_nodes_offline(timeout_seconds: int = 45) -> int:
             return len(stale_ids)
         return 0
 
-
-# --- ZONES CRUD ---
-def get_all_zones() -> List[Dict[str, Any]]:
+# --- GROUPS & ZONES CRUD ---
+def get_all_groups() -> List[Dict[str, Any]]:
     with get_db() as conn:
-        rows = conn.execute("""
-            SELECT z.id, z.name, z.description, z.created_at,
-                   COUNT(s.id) as speaker_count
-            FROM zones z
-            LEFT JOIN speakers s ON s.zone = z.name
-            GROUP BY z.id, z.name
-            ORDER BY z.name ASC
-        """).fetchall()
-        return [dict(r) for r in rows]
+        groups_rows = conn.execute("SELECT id, name, description, created_at FROM groups ORDER BY name ASC").fetchall()
+        speakers_rows = conn.execute("SELECT id, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
+        
+        counts = {}
+        for sp in speakers_rows:
+            sp_groups = parse_groups(sp["groups"] or sp["zone"])
+            for g in sp_groups:
+                counts[g] = counts.get(g, 0) + 1
 
-def create_zone(name: str, description: str = "") -> int:
+        result = []
+        for gr in groups_rows:
+            d = dict(gr)
+            d["speaker_count"] = counts.get(d["name"], 0)
+            result.append(d)
+        return result
+
+def create_group(name: str, description: str = "") -> int:
     name = name.strip()
     if not name:
-        raise ValueError("Nama zona tidak boleh kosong")
+        raise ValueError("Nama group tidak boleh kosong")
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO zones (name, description) VALUES (?, ?)", (name, description or ""))
+        cursor.execute("INSERT INTO groups (name, description) VALUES (?, ?)", (name, description or ""))
+        cursor.execute("INSERT OR IGNORE INTO zones (name, description) VALUES (?, ?)", (name, description or ""))
         conn.commit()
         return cursor.lastrowid
 
-def update_zone(old_name: str, new_name: str, description: Optional[str] = None):
+def update_group(old_name: str, new_name: str, description: Optional[str] = None):
     old_name = old_name.strip()
     new_name = new_name.strip()
     if not new_name:
-        raise ValueError("Nama zona baru tidak boleh kosong")
+        raise ValueError("Nama group baru tidak boleh kosong")
     with get_db() as conn:
         if description is not None:
+            conn.execute("UPDATE groups SET name = ?, description = ? WHERE name = ?", (new_name, description, old_name))
             conn.execute("UPDATE zones SET name = ?, description = ? WHERE name = ?", (new_name, description, old_name))
         else:
+            conn.execute("UPDATE groups SET name = ? WHERE name = ?", (new_name, old_name))
             conn.execute("UPDATE zones SET name = ? WHERE name = ?", (new_name, old_name))
-        conn.execute("UPDATE speakers SET zone = ? WHERE zone = ?", (new_name, old_name))
+
+        # Update speakers who have this group in their groups list
+        speakers = conn.execute("SELECT id, groups, zone FROM speakers").fetchall()
+        for sp in speakers:
+            sp_groups = parse_groups(sp["groups"] or sp["zone"])
+            if old_name in sp_groups:
+                updated_groups = [new_name if g == old_name else g for g in sp_groups]
+                seen = set()
+                deduped = [x for x in updated_groups if not (x in seen or seen.add(x))]
+                conn.execute(
+                    "UPDATE speakers SET groups = ?, zone = ? WHERE id = ?",
+                    (json.dumps(deduped), deduped[0] if deduped else "", sp["id"])
+                )
+
+        conn.execute("UPDATE schedules SET target_group = ? WHERE target_group = ?", (new_name, old_name))
         conn.execute("UPDATE schedules SET target_zone = ? WHERE target_zone = ?", (new_name, old_name))
         conn.commit()
 
-def delete_zone(name: str):
+def delete_group(name: str):
     name = name.strip()
     with get_db() as conn:
         cursor = conn.cursor()
+        cursor.execute("DELETE FROM groups WHERE name = ?", (name,))
         cursor.execute("DELETE FROM zones WHERE name = ?", (name,))
-        # Hanya jika ada speaker di zona ini, pindahkan ke 'Umum'
-        cursor.execute("SELECT COUNT(*) FROM speakers WHERE zone = ?", (name,))
-        count = cursor.fetchone()[0]
-        if count > 0:
-            cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES ('Umum')")
-            cursor.execute("UPDATE speakers SET zone = 'Umum' WHERE zone = ?", (name,))
-            cursor.execute("UPDATE schedules SET target_zone = 'Umum' WHERE target_zone = ?", (name,))
+
+        speakers = cursor.execute("SELECT id, groups, zone FROM speakers").fetchall()
+        for sp in speakers:
+            sp_groups = parse_groups(sp["groups"] or sp["zone"])
+            if name in sp_groups:
+                updated_groups = [g for g in sp_groups if g != name]
+                primary = updated_groups[0] if updated_groups else "Kantor"
+                cursor.execute(
+                    "UPDATE speakers SET groups = ?, zone = ? WHERE id = ?",
+                    (json.dumps(updated_groups), primary, sp["id"])
+                )
         conn.commit()
+
+# Legacy Zone Aliases (Fully backward-compatible)
+def get_all_zones() -> List[Dict[str, Any]]:
+    return get_all_groups()
+
+def create_zone(name: str, description: str = "") -> int:
+    return create_group(name, description)
+
+def update_zone(old_name: str, new_name: str, description: Optional[str] = None):
+    return update_group(old_name, new_name, description)
+
+def delete_zone(name: str):
+    return delete_group(name)

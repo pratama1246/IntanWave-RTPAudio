@@ -164,8 +164,8 @@ export default function App() {
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
 
   // Broadcast Target Selection State
-  const [targetMode, setTargetMode] = useState('all'); // 'all', 'zone', 'speaker'
-  const [selectedZone, setSelectedZone] = useState('Kantor');
+  const [targetMode, setTargetMode] = useState('all'); // 'all', 'group', 'speaker'
+  const [selectedGroup, setSelectedGroup] = useState('Kantor');
   const [selectedSpeakerId, setSelectedSpeakerId] = useState(null);
   const [selectedSpeakerIds, setSelectedSpeakerIds] = useState([]);
 
@@ -173,7 +173,7 @@ export default function App() {
   // Monitoring Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'online', 'offline'
-  const [zoneFilter, setZoneFilter] = useState('all');
+  const [groupFilter, setGroupFilter] = useState('all');
   const [isScanning, setIsScanning] = useState(false);
   const [testingSpeakerId, setTestingSpeakerId] = useState(null);
   const [pingingSpeakerId, setPingingSpeakerId] = useState(null);
@@ -201,19 +201,22 @@ export default function App() {
   const [categoryChangeTarget, setCategoryChangeTarget] = useState(null);
   const [editingDisplayName, setEditingDisplayName] = useState('');
 
-  // Zone Management State
-  const [zones, setZones] = useState([]);
-  const [showZoneModal, setShowZoneModal] = useState(false);
-  const [newZoneName, setNewZoneName] = useState('');
-  const [editingZoneOldName, setEditingZoneOldName] = useState(null);
-  const [editingZoneNewName, setEditingZoneNewName] = useState('');
+  // Group Management State
+  const [groups, setGroups] = useState([]);
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [editingGroupOldName, setEditingGroupOldName] = useState(null);
+  const [editingGroupNewName, setEditingGroupNewName] = useState('');
 
   // Speaker Form State
   const [speakerForm, setSpeakerForm] = useState({
     name: '',
     ip_address: '',
     port: 5004,
-    zone: 'Kantor'
+    groups: ['Kantor'],
+    groupsText: 'Kantor',
+    zone: 'Kantor',
+    device_type: 'physical'
   });
   const [modalPingStatus, setModalPingStatus] = useState({ testing: false, result: null });
 
@@ -275,20 +278,20 @@ export default function App() {
   // Fetch initial data
   const fetchData = async () => {
     try {
-      const [resAudio, resSched, resSet, resLogs, resSpeakers, resZones] = await Promise.all([
+      const [resAudio, resSched, resSet, resLogs, resSpeakers, resGroups] = await Promise.all([
         fetch('/api/audio').then(r => r.json()),
         fetch('/api/schedules').then(r => r.json()),
         fetch('/api/settings').then(r => r.json()),
         fetch('/api/logs').then(r => r.json()),
         fetch('/api/speakers').then(r => r.json()),
-        fetch('/api/zones').then(r => r.json()).catch(() => [])
+        fetch('/api/groups').then(r => r.json()).catch(() => fetch('/api/zones').then(r => r.json()).catch(() => []))
       ]);
       setAudioList(resAudio || []);
       setSchedules(resSched || []);
       setSettings(resSet || {});
       setLogs(resLogs || []);
       setSpeakers(resSpeakers || []);
-      setZones(resZones || []);
+      setGroups(resGroups || []);
 
       if (resAudio && resAudio.length > 0 && !newSchedule.audio_file_id) {
         setNewSchedule(prev => ({ ...prev, audio_file_id: resAudio[0].id }));
@@ -298,15 +301,15 @@ export default function App() {
     }
   };
 
-  const fetchZones = async () => {
+  const fetchGroups = async () => {
     try {
-      const res = await fetch('/api/zones');
+      const res = await fetch('/api/groups');
       if (res.ok) {
         const data = await res.json();
-        setZones(data);
+        setGroups(data);
       }
     } catch (err) {
-      console.error('Failed to fetch zones', err);
+      console.error('Failed to fetch groups', err);
     }
   };
 
@@ -332,8 +335,10 @@ export default function App() {
           const data = JSON.parse(event.data);
           if (data.type === 'speakers_update' && Array.isArray(data.speakers)) {
             setSpeakers(data.speakers);
+          } else if (data.type === 'groups_update' && Array.isArray(data.groups)) {
+            setGroups(data.groups);
           } else if (data.type === 'zones_update' && Array.isArray(data.zones)) {
-            setZones(data.zones);
+            setGroups(data.zones);
           } else if (data.status) {
             setPlayback(data);
           }
@@ -376,13 +381,24 @@ export default function App() {
     setPreviewingId(null);
   };
 
-  // Unique Zones list from zones table and speakers
-  const zonesList = useMemo(() => {
+  // Helper ambil daftar groups dari speaker
+  const getSpeakerGroups = (s) => {
+    if (!s) return [];
+    if (Array.isArray(s.groups) && s.groups.length > 0) return s.groups;
+    if (s.zone) return [s.zone];
+    return ['Kantor'];
+  };
+
+  // Unique Groups list from groups table and speakers
+  const groupsList = useMemo(() => {
     const set = new Set();
-    zones.forEach(z => z && z.name && set.add(z.name.trim()));
-    speakers.forEach(s => s && s.zone && set.add(s.zone.trim()));
+    groups.forEach(g => g && g.name && set.add(g.name.trim()));
+    speakers.forEach(s => {
+      const grps = getSpeakerGroups(s);
+      grps.forEach(g => g && set.add(g.trim()));
+    });
     return Array.from(set).filter(Boolean);
-  }, [zones, speakers]);
+  }, [groups, speakers]);
 
   // Audio list filtered by category
   const filteredAudioList = useMemo(() => {
@@ -404,34 +420,33 @@ export default function App() {
   const filteredSpeakers = useMemo(() => {
     return speakers.filter(s => {
       const q = searchQuery.toLowerCase().trim();
+      const sGroups = getSpeakerGroups(s);
       const matchesSearch = !q || 
         s.name.toLowerCase().includes(q) || 
         s.ip_address.toLowerCase().includes(q) || 
-        (s.zone || '').toLowerCase().includes(q);
+        sGroups.some(g => g.toLowerCase().includes(q));
 
       const matchesStatus = 
         statusFilter === 'all' ||
         (statusFilter === 'online' && s.status === 'online') ||
         (statusFilter === 'offline' && s.status !== 'online');
 
-      const matchesZone = 
-        zoneFilter === 'all' || s.zone === zoneFilter;
+      const matchesGroup = 
+        groupFilter === 'all' || sGroups.includes(groupFilter);
 
-      return matchesSearch && matchesStatus && matchesZone;
+      return matchesSearch && matchesStatus && matchesGroup;
     });
-  }, [speakers, searchQuery, statusFilter, zoneFilter]);
+  }, [speakers, searchQuery, statusFilter, groupFilter]);
 
   // Target summary calculation for Broadcast
   const targetSummaryText = useMemo(() => {
     if (targetMode === 'all') {
       return `Semua Speaker (${speakers.length} terdaftar • ${onlineCount} online)`;
     }
-    if (targetMode === 'zone') {
-      const zoneSpeakers = speakers.filter(s => s.zone === selectedZone);
-      const onCount = zoneSpeakers.filter(s => s.status === 'online').length;
-      const zoneIdx = zonesList.indexOf(selectedZone);
-      const zoneLabel = zoneIdx >= 0 ? `Zona ${zoneIdx + 1}: ${selectedZone}` : `Zona ${selectedZone}`;
-      return `${zoneLabel} (${zoneSpeakers.length} speaker • ${onCount} online)`;
+    if (targetMode === 'group' || targetMode === 'zone') {
+      const grpSpeakers = speakers.filter(s => getSpeakerGroups(s).includes(selectedGroup));
+      const onCount = grpSpeakers.filter(s => s.status === 'online').length;
+      return `Group: ${selectedGroup} (${grpSpeakers.length} speaker • ${onCount} online)`;
     }
     if (targetMode === 'speaker') {
       const sp = speakers.find(s => s.id === selectedSpeakerId);
@@ -440,24 +455,26 @@ export default function App() {
       }
     }
     return 'Semua Speaker';
-  }, [targetMode, selectedZone, selectedSpeakerId, speakers, onlineCount, zonesList]);
+  }, [targetMode, selectedGroup, selectedSpeakerId, speakers, onlineCount]);
 
-  // Direct Target Options: Hanya menampilkan Semua Speaker, Zona yang memiliki speaker terdaftar, dan Speaker tunggal
+  // Direct Target Options: Hanya menampilkan Semua Speaker, Group yang memiliki speaker terdaftar, dan Speaker tunggal
   const targetOptions = useMemo(() => {
     const list = [
       { value: 'all', label: 'Semua Speaker' }
     ];
 
-    // Hanya tampilkan zona yang benar-benar memiliki speaker terdaftar!
-    const activeZonesWithSpeakers = zonesList.filter(z => 
-      speakers.some(s => (s.zone || '').trim().toLowerCase() === z.trim().toLowerCase())
+    // Hanya tampilkan group yang benar-benar memiliki speaker terdaftar!
+    const activeGroupsWithSpeakers = groupsList.filter(g => 
+      speakers.some(s => getSpeakerGroups(s).map(x => x.toLowerCase()).includes(g.toLowerCase()))
     );
 
-    activeZonesWithSpeakers.forEach((z, idx) => {
-      const spkCount = speakers.filter(s => (s.zone || '').trim().toLowerCase() === z.trim().toLowerCase()).length;
+    activeGroupsWithSpeakers.forEach((g) => {
+      const spkCount = speakers.filter(s => 
+        getSpeakerGroups(s).map(x => x.toLowerCase()).includes(g.toLowerCase())
+      ).length;
       list.push({
-        value: `zone:${z}`,
-        label: `Zona ${idx + 1}: ${z} (${spkCount} Speaker)`
+        value: `group:${g}`,
+        label: `Group: ${g} (${spkCount} Speaker)`
       });
     });
 
@@ -469,21 +486,21 @@ export default function App() {
     });
 
     return list;
-  }, [zonesList, speakers]);
+  }, [groupsList, speakers]);
 
   const currentTargetValue = useMemo(() => {
-    if (targetMode === 'zone') return `zone:${selectedZone}`;
+    if (targetMode === 'group' || targetMode === 'zone') return `group:${selectedGroup}`;
     if (targetMode === 'speaker') return `speaker:${selectedSpeakerId}`;
     return 'all';
-  }, [targetMode, selectedZone, selectedSpeakerId]);
+  }, [targetMode, selectedGroup, selectedSpeakerId]);
 
   const handleTargetChange = (val) => {
     if (val === 'all') {
       setTargetMode('all');
-    } else if (val.startsWith('zone:')) {
-      const zoneName = val.replace('zone:', '');
-      setTargetMode('zone');
-      setSelectedZone(zoneName);
+    } else if (val.startsWith('group:') || val.startsWith('zone:')) {
+      const grpName = val.replace(/^(group:|zone:)/, '');
+      setTargetMode('group');
+      setSelectedGroup(grpName);
     } else if (val.startsWith('speaker:')) {
       const spId = parseInt(val.replace('speaker:', ''), 10);
       setTargetMode('speaker');
@@ -580,8 +597,9 @@ export default function App() {
   // Helper build target payload for server broadcast
   const buildTargetPayload = () => {
     return {
-      target_mode: targetMode,
-      target_zone: targetMode === 'zone' ? selectedZone : null,
+      target_mode: (targetMode === 'group' || targetMode === 'zone') ? 'group' : targetMode,
+      target_group: (targetMode === 'group' || targetMode === 'zone') ? selectedGroup : null,
+      target_zone: (targetMode === 'group' || targetMode === 'zone') ? selectedGroup : null,
       speaker_id: targetMode === 'speaker' ? selectedSpeakerId : null
     };
   };
@@ -691,11 +709,14 @@ export default function App() {
   // Open Add Speaker Modal
   const handleOpenAddSpeaker = () => {
     setEditingSpeaker(null);
+    const defaultGrp = groupsList[0] || 'Kantor';
     setSpeakerForm({
       name: '',
       ip_address: '',
       port: 5004,
-      zone: zonesList[0] || 'Kantor',
+      groups: [defaultGrp],
+      groupsText: defaultGrp,
+      zone: defaultGrp,
       device_type: 'physical'
     });
     setModalPingStatus({ testing: false, result: null });
@@ -705,15 +726,38 @@ export default function App() {
   // Open Edit Speaker Modal
   const handleOpenEditSpeaker = (speaker) => {
     setEditingSpeaker(speaker);
+    const grps = getSpeakerGroups(speaker);
+    const textVal = grps.join(', ');
     setSpeakerForm({
       name: speaker.name,
       ip_address: speaker.ip_address,
       port: speaker.port || 5004,
-      zone: speaker.zone || 'Dermaga',
+      groups: grps,
+      groupsText: textVal,
+      zone: grps[0] || 'Kantor',
       device_type: speaker.device_type || 'physical'
     });
     setModalPingStatus({ testing: false, result: null });
     setShowSpeakerModal(true);
+  };
+
+  // Toggle group selection badge in speaker form
+  const toggleSpeakerFormGroup = (groupName) => {
+    const raw = speakerForm.groupsText || '';
+    const current = raw.split(',').map(g => g.trim()).filter(Boolean);
+    const lower = groupName.trim().toLowerCase();
+    let next;
+    if (current.some(g => g.toLowerCase() === lower)) {
+      next = current.filter(g => g.toLowerCase() !== lower);
+    } else {
+      next = [...current, groupName.trim()];
+    }
+    setSpeakerForm(prev => ({
+      ...prev,
+      groupsText: next.join(', '),
+      groups: next,
+      zone: next[0] || 'Kantor'
+    }));
   };
 
   // Test Ping from inside Modal
@@ -746,17 +790,32 @@ export default function App() {
   const handleSaveSpeaker = async (e) => {
     e.preventDefault();
     try {
+      const parsedGrps = (speakerForm.groupsText || '')
+        .split(',')
+        .map(g => g.trim())
+        .filter(Boolean);
+      const finalGroups = parsedGrps.length > 0 ? parsedGrps : ['Kantor'];
+      const payload = {
+        name: speakerForm.name,
+        ip_address: speakerForm.ip_address,
+        port: speakerForm.port || 5004,
+        groups: finalGroups,
+        group: finalGroups[0],
+        zone: finalGroups[0],
+        device_type: speakerForm.device_type || 'physical'
+      };
+
       if (editingSpeaker) {
         await fetch(`/api/speakers/${editingSpeaker.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(speakerForm)
+          body: JSON.stringify(payload)
         });
       } else {
         await fetch('/api/speakers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(speakerForm)
+          body: JSON.stringify(payload)
         });
       }
       setShowSpeakerModal(false);
@@ -1015,66 +1074,66 @@ export default function App() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Zone Management Handlers
-  const handleCreateZone = async (e) => {
+  // Group Management Handlers
+  const handleCreateGroup = async (e) => {
     if (e) e.preventDefault();
-    const name = newZoneName.trim();
+    const name = newGroupName.trim();
     if (!name) return;
     try {
-      const res = await fetch('/api/zones', {
+      const res = await fetch('/api/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name })
       });
       if (res.ok) {
-        setNewZoneName('');
-        fetchZones();
+        setNewGroupName('');
+        fetchGroups();
       } else {
         const err = await res.json();
-        alert(err.detail || 'Gagal menambah zona');
+        alert(err.detail || 'Gagal menambah group');
       }
     } catch (err) {
       alert('Gagal menghubungi server');
     }
   };
 
-  const handleUpdateZone = async (oldName, newName) => {
+  const handleUpdateGroup = async (oldName, newName) => {
     const trimmed = (newName || '').trim();
     if (!trimmed || oldName === trimmed) {
-      setEditingZoneOldName(null);
+      setEditingGroupOldName(null);
       return;
     }
     try {
-      const res = await fetch(`/api/zones/${encodeURIComponent(oldName)}`, {
+      const res = await fetch(`/api/groups/${encodeURIComponent(oldName)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed })
       });
       if (res.ok) {
-        setEditingZoneOldName(null);
-        fetchZones();
+        setEditingGroupOldName(null);
+        fetchGroups();
         fetchData();
       } else {
         const err = await res.json();
-        alert(err.detail || 'Gagal mengubah zona');
+        alert(err.detail || 'Gagal mengubah group');
       }
     } catch (err) {
       alert('Gagal menghubungi server');
     }
   };
 
-  const handleDeleteZone = async (zoneName) => {
-    if (!confirm(`Hapus zona "${zoneName}"? Speaker di zona ini akan dialihkan ke zona "Umum".`)) return;
+  const handleDeleteGroup = async (groupName) => {
+    if (!confirm(`Hapus group "${groupName}"? Speaker di group ini akan dilepas dari group tersebut.`)) return;
     try {
-      const res = await fetch(`/api/zones/${encodeURIComponent(zoneName)}`, {
+      const res = await fetch(`/api/groups/${encodeURIComponent(groupName)}`, {
         method: 'DELETE'
       });
       if (res.ok) {
-        fetchZones();
+        fetchGroups();
         fetchData();
       } else {
         const err = await res.json();
-        alert(err.detail || 'Gagal menghapus zona');
+        alert(err.detail || 'Gagal menghapus group');
       }
     } catch (err) {
       alert('Gagal menghubungi server');
@@ -1523,8 +1582,8 @@ export default function App() {
                                 </div>
                                 <span className="text-slate-300">•</span>
                                 <span className="inline-flex items-center text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60 shrink-0">
-                                  {s.target_mode === 'zone' && s.target_zone
-                                    ? `Zona: ${s.target_zone}`
+                                  {(s.target_mode === 'group' || s.target_mode === 'zone') && (s.target_group || s.target_zone)
+                                    ? `Group: ${s.target_group || s.target_zone}`
                                     : s.target_mode === 'speaker' && s.target_speaker_id
                                     ? `Speaker: ${speakers.find(sp => sp.id === s.target_speaker_id)?.name || `ID ${s.target_speaker_id}`}`
                                     : 'Semua Speaker'}
@@ -1841,7 +1900,7 @@ export default function App() {
                     type="text"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    placeholder="Cari nama, IP, zona..."
+                    placeholder="Cari nama, IP, group..."
                     className="w-full pl-8 pr-2.5 py-1.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden bg-slate-50/50"
                   />
                   {searchQuery && (
@@ -1867,15 +1926,15 @@ export default function App() {
                   size="sm"
                 />
 
-                {/* Zone Dropdown */}
+                {/* Group Dropdown */}
                 <CustomDropdown
-                  value={zoneFilter}
-                  onChange={setZoneFilter}
+                  value={groupFilter}
+                  onChange={setGroupFilter}
                   options={[
-                    { value: 'all', label: 'Semua Zona' },
-                    ...zonesList.map((z, idx) => ({
-                      value: z,
-                      label: `Zona ${idx + 1}: ${z}`
+                    { value: 'all', label: 'Semua Group' },
+                    ...groupsList.map((g) => ({
+                      value: g,
+                      label: `Group: ${g}`
                     }))
                   ]}
                   variant="light"
@@ -1886,12 +1945,12 @@ export default function App() {
               {/* Action Buttons */}
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setShowZoneModal(true)}
+                  onClick={() => setShowGroupModal(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all cursor-pointer"
-                  title="Tambah, ubah nama, atau kelola zona speaker"
+                  title="Tambah, ubah nama, atau kelola group speaker"
                 >
                   <Layers className="w-3.5 h-3.5 text-slate-600" />
-                  <span>Kelola Zona</span>
+                  <span>Kelola Group</span>
                 </button>
 
                 <button
@@ -1926,7 +1985,7 @@ export default function App() {
                     <tr>
                       <th className="py-2.5 px-3.5">Status</th>
                       <th className="py-2.5 px-3">Nama Perangkat</th>
-                      <th className="py-2.5 px-3">Zona</th>
+                      <th className="py-2.5 px-3">Group</th>
                       <th className="py-2.5 px-3">Alamat IP</th>
                       <th className="py-2.5 px-3 text-right pr-4">Aksi</th>
                     </tr>
@@ -1971,10 +2030,14 @@ export default function App() {
                               </div>
                             </div>
                           </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <span className="inline-block px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200/60">
-                              {s.zone || 'Kantor'}
-                            </span>
+                          <td className="py-2 px-3">
+                            <div className="flex flex-wrap items-center gap-1">
+                              {getSpeakerGroups(s).map(g => (
+                                <span key={g} className="inline-block px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/70">
+                                  {g}
+                                </span>
+                              ))}
+                            </div>
                           </td>
                           <td className="py-2 px-3 whitespace-nowrap">
                             <div className="inline-flex items-center gap-1 text-slate-600 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100 text-[11px]">
@@ -2116,33 +2179,39 @@ export default function App() {
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-medium text-slate-700">Zona Lokasi</label>
-                  <span className="text-[11px] text-slate-400">Pilih zona atau ketik zona baru</span>
+                  <label className="block text-xs font-medium text-slate-700">Group Audio</label>
+                  <span className="text-[11px] text-slate-400">Pilih 1 atau lebih group (klik badge)</span>
                 </div>
                 <input 
                   type="text" 
                   required
-                  placeholder="Ketik nama zona (misal: Dermaga, Pos 1, Gudang...)"
-                  value={speakerForm.zone}
-                  onChange={e => setSpeakerForm({ ...speakerForm, zone: e.target.value })}
+                  placeholder="Ketik nama group (pisahkan koma jika > 1, misal: Kantor, Satpam)"
+                  value={speakerForm.groupsText || ''}
+                  onChange={e => setSpeakerForm({ ...speakerForm, groupsText: e.target.value })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
-                {zonesList.length > 0 && (
+                {groupsList.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                    {zonesList.map(z => (
-                      <button
-                        type="button"
-                        key={z}
-                        onClick={() => setSpeakerForm({ ...speakerForm, zone: z })}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] border transition-all cursor-pointer ${
-                          speakerForm.zone === z
-                            ? 'bg-blue-50 border-blue-300 text-blue-700 font-medium'
-                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                        }`}
-                      >
-                        {z}
-                      </button>
-                    ))}
+                    {groupsList.map(g => {
+                      const selected = (speakerForm.groupsText || '')
+                        .split(',')
+                        .map(x => x.trim().toLowerCase())
+                        .includes(g.toLowerCase());
+                      return (
+                        <button
+                          type="button"
+                          key={g}
+                          onClick={() => toggleSpeakerFormGroup(g)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] border transition-all cursor-pointer ${
+                            selected
+                              ? 'bg-blue-600 border-blue-600 text-white font-medium shadow-2xs'
+                              : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {g} {selected && '✓'}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2318,19 +2387,20 @@ export default function App() {
                 <label className="block text-xs font-medium text-slate-700 mb-1">Target Siaran</label>
                 <CustomDropdown
                   value={
-                    newSchedule.target_mode === 'zone' && newSchedule.target_zone
-                      ? `zone:${newSchedule.target_zone}`
+                    (newSchedule.target_mode === 'group' || newSchedule.target_mode === 'zone') && (newSchedule.target_group || newSchedule.target_zone)
+                      ? `group:${newSchedule.target_group || newSchedule.target_zone}`
                       : newSchedule.target_mode === 'speaker' && newSchedule.target_speaker_id
                       ? `speaker:${newSchedule.target_speaker_id}`
                       : 'all'
                   }
                   onChange={(val) => {
                     if (val === 'all') {
-                      setNewSchedule(prev => ({ ...prev, target_mode: 'all', target_zone: '', target_speaker_id: 0 }));
-                    } else if (val.startsWith('zone:')) {
-                      setNewSchedule(prev => ({ ...prev, target_mode: 'zone', target_zone: val.replace('zone:', ''), target_speaker_id: 0 }));
+                      setNewSchedule(prev => ({ ...prev, target_mode: 'all', target_group: '', target_zone: '', target_speaker_id: 0 }));
+                    } else if (val.startsWith('group:') || val.startsWith('zone:')) {
+                      const gName = val.replace(/^(group:|zone:)/, '');
+                      setNewSchedule(prev => ({ ...prev, target_mode: 'group', target_group: gName, target_zone: gName, target_speaker_id: 0 }));
                     } else if (val.startsWith('speaker:')) {
-                      setNewSchedule(prev => ({ ...prev, target_mode: 'speaker', target_zone: '', target_speaker_id: parseInt(val.replace('speaker:', ''), 10) }));
+                      setNewSchedule(prev => ({ ...prev, target_mode: 'speaker', target_group: '', target_zone: '', target_speaker_id: parseInt(val.replace('speaker:', ''), 10) }));
                     }
                   }}
                   options={targetOptions}
@@ -2776,9 +2846,9 @@ export default function App() {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: KELOLA ZONA SPEAKER                                */}
+      {/* MODAL: KELOLA GROUP SPEAKER                               */}
       {/* ========================================================= */}
-      {showZoneModal && (
+      {showGroupModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg max-h-[85vh] flex flex-col p-5 shadow-xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -2787,14 +2857,14 @@ export default function App() {
                   <Layers className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900">Kelola Zona Speaker</h3>
-                  <p className="text-xs text-slate-500">Tambah zona baru, ubah nama zona, atau hapus zona</p>
+                  <h3 className="text-base font-semibold text-slate-900">Kelola Group Speaker</h3>
+                  <p className="text-xs text-slate-500">Tambah group baru, ubah nama group, atau hapus group</p>
                 </div>
               </div>
               <button 
                 onClick={() => {
-                  setShowZoneModal(false);
-                  setEditingZoneOldName(null);
+                  setShowGroupModal(false);
+                  setEditingGroupOldName(null);
                 }} 
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
@@ -2802,18 +2872,18 @@ export default function App() {
               </button>
             </div>
 
-            {/* Form Tambah Zona */}
-            <form onSubmit={handleCreateZone} className="mt-4 flex gap-2">
+            {/* Form Tambah Group */}
+            <form onSubmit={handleCreateGroup} className="mt-4 flex gap-2">
               <input
                 type="text"
-                placeholder="Nama zona baru (misal: Workshop, Dermaga 2...)"
-                value={newZoneName}
-                onChange={e => setNewZoneName(e.target.value)}
+                placeholder="Nama group baru (misal: Workshop, Dermaga 2...)"
+                value={newGroupName}
+                onChange={e => setNewGroupName(e.target.value)}
                 className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
               />
               <button
                 type="submit"
-                disabled={!newZoneName.trim()}
+                disabled={!newGroupName.trim()}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white shadow-xs transition-all cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -2821,48 +2891,48 @@ export default function App() {
               </button>
             </form>
 
-            {/* List of Zones */}
+            {/* List of Groups */}
             <div className="flex-1 overflow-y-auto space-y-2 mt-4 text-xs pr-1">
               <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1">
-                Daftar Zona Aktif ({zonesList.length})
+                Daftar Group Aktif ({groupsList.length})
               </div>
-              {zonesList.length === 0 ? (
+              {groupsList.length === 0 ? (
                 <div className="p-6 text-center text-slate-400 text-xs">
-                  Belum ada zona terdaftar.
+                  Belum ada group terdaftar.
                 </div>
               ) : (
-                zonesList.map((z) => {
-                  const speakerCount = speakers.filter(s => s.zone === z).length;
-                  const isEditing = editingZoneOldName === z;
+                groupsList.map((g) => {
+                  const speakerCount = speakers.filter(s => getSpeakerGroups(s).includes(g)).length;
+                  const isEditing = editingGroupOldName === g;
 
                   return (
                     <div 
-                      key={z} 
+                      key={g} 
                       className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-2 transition-all hover:bg-slate-100/60"
                     >
                       {isEditing ? (
                         <div className="flex-1 flex items-center gap-2">
                           <input
                             type="text"
-                            value={editingZoneNewName}
-                            onChange={e => setEditingZoneNewName(e.target.value)}
+                            value={editingGroupNewName}
+                            onChange={e => setEditingGroupNewName(e.target.value)}
                             onKeyDown={e => {
-                              if (e.key === 'Enter') handleUpdateZone(z, editingZoneNewName);
-                              if (e.key === 'Escape') setEditingZoneOldName(null);
+                              if (e.key === 'Enter') handleUpdateGroup(g, editingGroupNewName);
+                              if (e.key === 'Escape') setEditingGroupOldName(null);
                             }}
                             autoFocus
                             className="flex-1 px-2.5 py-1.5 rounded-lg border border-blue-400 bg-white text-xs outline-hidden focus:ring-1 focus:ring-blue-500"
                           />
                           <button
                             type="button"
-                            onClick={() => handleUpdateZone(z, editingZoneNewName)}
+                            onClick={() => handleUpdateGroup(g, editingGroupNewName)}
                             className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs cursor-pointer shadow-xs"
                           >
                             Simpan
                           </button>
                           <button
                             type="button"
-                            onClick={() => setEditingZoneOldName(null)}
+                            onClick={() => setEditingGroupOldName(null)}
                             className="px-2.5 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium text-xs cursor-pointer"
                           >
                             Batal
@@ -2871,7 +2941,7 @@ export default function App() {
                       ) : (
                         <>
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <span className="font-semibold text-slate-800 truncate">{z}</span>
+                            <span className="font-semibold text-slate-800 truncate">{g}</span>
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white border border-slate-200 text-slate-500">
                               {speakerCount} Speaker
                             </span>
@@ -2881,19 +2951,19 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => {
-                                setEditingZoneOldName(z);
-                                setEditingZoneNewName(z);
+                                setEditingGroupOldName(g);
+                                setEditingGroupNewName(g);
                               }}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-white transition-colors cursor-pointer"
-                              title="Ubah nama zona"
+                              title="Ubah nama group"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteZone(z)}
+                              onClick={() => handleDeleteGroup(g)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-white transition-colors cursor-pointer"
-                              title="Hapus zona"
+                              title="Hapus group"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -2910,8 +2980,8 @@ export default function App() {
               <button 
                 type="button" 
                 onClick={() => {
-                  setShowZoneModal(false);
-                  setEditingZoneOldName(null);
+                  setShowGroupModal(false);
+                  setEditingGroupOldName(null);
                 }}
                 className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
               >

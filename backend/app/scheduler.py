@@ -4,7 +4,7 @@ from pathlib import Path
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from app.database import get_db, log_event, get_settings
+from app.database import get_db, log_event, get_settings, parse_groups
 from app.config import DEFAULT_MULTICAST_IP, DEFAULT_MULTICAST_PORT, AUDIO_DIR
 from app.audio_engine import audio_engine
 
@@ -38,18 +38,23 @@ async def trigger_schedule_job(schedule_id: int):
     log_event("SCHEDULE_TRIGGERED", f"Memutar jadwal otomatis: '{row['name']}' ({row['display_name']})")
     try:
         tmode = row["target_mode"] if "target_mode" in row.keys() else "all"
-        tzone = row["target_zone"] if "target_zone" in row.keys() else ""
+        tgroup = row["target_group"] if "target_group" in row.keys() else (row["target_zone"] if "target_zone" in row.keys() else "")
         tspk_id = row["target_speaker_id"] if "target_speaker_id" in row.keys() else 0
 
         target_endpoints = None
         target_desc = "Semua Speaker"
 
-        if tmode == "zone" and tzone:
+        if tmode in ("group", "zone") and tgroup:
             with get_db() as conn:
-                sp_rows = conn.execute("SELECT ip_address, port FROM speakers WHERE zone = ? AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", (tzone,)).fetchall()
-                if sp_rows:
-                    target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in sp_rows]
-                    target_desc = f"Zona {tzone} ({len(target_endpoints)} Speaker)"
+                sp_rows = conn.execute("SELECT id, ip_address, port, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
+                matching_rows = []
+                for r in sp_rows:
+                    grps = parse_groups(r["groups"] or r["zone"])
+                    if tgroup in grps or r["zone"] == tgroup:
+                        matching_rows.append(r)
+                if matching_rows:
+                    target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in matching_rows]
+                    target_desc = f"Group {tgroup} ({len(target_endpoints)} Speaker)"
         elif tmode == "speaker" and tspk_id:
             with get_db() as conn:
                 sp_row = conn.execute("SELECT ip_address, port, name FROM speakers WHERE id = ? AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", (tspk_id,)).fetchone()

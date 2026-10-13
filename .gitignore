@@ -17,6 +17,7 @@ dist-ssr/
 *.local
 
 # Large binaries & Client build artifacts (Excludes 100MB+ binaries for GitHub)
+build/
 client-windows/build/
 client-windows/dist/
 client-windows/IntanWave-Node/

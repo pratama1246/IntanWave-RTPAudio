@@ -162,9 +162,9 @@ class IntanWaveNodeWindow:
         self.entry_name.insert(0, self.receiver.device_name)
         self.entry_name.grid(row=1, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
-        ttk.Label(srv_grid, text="Zona Lokasi:").grid(row=2, column=0, sticky=tk.W, pady=3)
+        ttk.Label(srv_grid, text="Group Audio:").grid(row=2, column=0, sticky=tk.W, pady=3)
         self.entry_zone = ttk.Entry(srv_grid)
-        self.entry_zone.insert(0, self.receiver.zone)
+        self.entry_zone.insert(0, ", ".join(self.receiver.groups))
         self.entry_zone.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
         # 3. Form Konfigurasi Alamat RTP
@@ -200,8 +200,8 @@ class IntanWaveNodeWindow:
         # 5. Tombol Simpan
         self.btn_save = ttk.Button(
             main_frame, 
-            text="Simpan & Terapkan Konfigurasi", 
             style="Save.TButton",
+            text="Simpan & Terapkan Konfigurasi", 
             command=self.save_settings
         )
         self.btn_save.pack(fill=tk.X, pady=(0, 10))
@@ -241,7 +241,7 @@ class IntanWaveNodeWindow:
             messagebox.showwarning("Peringatan", "Nama Perangkat tidak boleh kosong.", parent=self.root)
             return
         if not new_zone:
-            messagebox.showwarning("Peringatan", "Zona Lokasi tidak boleh kosong.", parent=self.root)
+            messagebox.showwarning("Peringatan", "Group Audio tidak boleh kosong.\n(Pisahkan koma jika > 1, misal: Kantor, Satpam)", parent=self.root)
             return
         if not new_ip or not new_port:
             messagebox.showwarning("Peringatan", "Alamat IP Multicast dan Port tidak boleh kosong.", parent=self.root)
@@ -252,7 +252,7 @@ class IntanWaveNodeWindow:
             self.receiver.save_config(new_server, new_name, new_zone, new_ip, port_num)
             messagebox.showinfo(
                 "Berhasil", 
-                f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nZona: {new_zone}\nReceiver: rtp://{new_ip}:{port_num}",
+                f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}\nReceiver: rtp://{new_ip}:{port_num}",
                 parent=self.root
             )
         except ValueError:
@@ -263,9 +263,10 @@ class IntanWaveNodeWindow:
         def _apply():
             if connected:
                 registered_ip = info.get("ip_address", self.receiver.registered_ip)
-                zone = info.get("zone", self.receiver.zone)
+                grps = info.get("groups")
+                grps_str = ", ".join(grps) if isinstance(grps, list) else (info.get("zone") or self.receiver.zone)
                 self.lbl_server_status.config(
-                    text=f"🟢 Terdaftar di Server ({registered_ip}) • Zona: {zone}",
+                    text=f"🟢 Terdaftar di Server ({registered_ip}) • Group: {grps_str}",
                     foreground="#0d7a3e"
                 )
             else:

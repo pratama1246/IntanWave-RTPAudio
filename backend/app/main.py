@@ -17,7 +17,9 @@ from app.database import (
     get_all_speakers, get_speaker_by_id, create_speaker, update_speaker, 
     delete_speaker, update_speaker_status,
     upsert_node_heartbeat, mark_stale_nodes_offline,
-    get_all_zones, create_zone, update_zone, delete_zone
+    get_all_groups, create_group, update_group, delete_group,
+    get_all_zones, create_zone, update_zone, delete_zone,
+    parse_groups
 )
 from app.audio_engine import audio_engine
 from app.scheduler import scheduler, reload_schedules
@@ -36,15 +38,16 @@ class ConnectionManager:
         self.active_connections.append(websocket)
         # Kirim status awal playback
         await websocket.send_json(audio_engine.get_status())
-        # Kirim status awal seluruh speaker dan zona
+        # Kirim status awal seluruh speaker dan group
         try:
             speakers = get_all_speakers()
             await websocket.send_json({"type": "speakers_update", "speakers": speakers})
         except Exception:
             pass
         try:
-            zones = get_all_zones()
-            await websocket.send_json({"type": "zones_update", "zones": zones})
+            groups = get_all_groups()
+            await websocket.send_json({"type": "groups_update", "groups": groups})
+            await websocket.send_json({"type": "zones_update", "zones": groups})
         except Exception:
             pass
 
@@ -275,7 +278,8 @@ class PlayRequest(BaseModel):
     filename: Optional[str] = None
     enable_multicast: Optional[bool] = None
     enable_local: Optional[bool] = None
-    target_mode: Optional[str] = "all"  # 'all', 'zone', 'speaker', 'custom'
+    target_mode: Optional[str] = "all"  # 'all', 'group', 'zone', 'speaker', 'custom'
+    target_group: Optional[str] = None
     target_zone: Optional[str] = None
     speaker_id: Optional[int] = None
     speaker_ids: Optional[List[int]] = None
@@ -301,12 +305,18 @@ def play_audio(req: PlayRequest):
     target_endpoints = None
     target_desc = "Semua Speaker"
 
-    if req.target_mode == "zone" and req.target_zone:
+    if req.target_mode in ("group", "zone") and (req.target_group or req.target_zone):
+        t_group = (req.target_group or req.target_zone).strip()
         with get_db() as conn:
-            rows = conn.execute("SELECT ip_address, port FROM speakers WHERE zone = ? AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", (req.target_zone,)).fetchall()
-            if rows:
-                target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in rows]
-                target_desc = f"Zona {req.target_zone} ({len(target_endpoints)} Speaker)"
+            rows = conn.execute("SELECT id, name, ip_address, port, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
+            matching_rows = []
+            for r in rows:
+                grps = parse_groups(r["groups"] or r["zone"])
+                if t_group in grps or r["zone"] == t_group:
+                    matching_rows.append(r)
+            if matching_rows:
+                target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in matching_rows]
+                target_desc = f"Group {t_group} ({len(target_endpoints)} Speaker)"
     elif req.target_mode == "speaker" and req.speaker_id:
         with get_db() as conn:
             sp = conn.execute("SELECT ip_address, port, name FROM speakers WHERE id = ? AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", (req.speaker_id,)).fetchone()
@@ -358,20 +368,26 @@ class SpeakerCreate(BaseModel):
     name: str
     ip_address: str
     port: int = 5004
-    zone: str = "Kantor"
+    groups: Optional[List[str]] = None
+    group: Optional[str] = None
+    zone: Optional[str] = None
     device_type: Optional[str] = "physical"
 
 class SpeakerUpdate(BaseModel):
     name: str
     ip_address: str
     port: int = 5004
-    zone: str = "Kantor"
+    groups: Optional[List[str]] = None
+    group: Optional[str] = None
+    zone: Optional[str] = None
     enabled: int = 1
     device_type: Optional[str] = "physical"
 
 class NodeHeartbeatRequest(BaseModel):
     node_id: str
     device_name: Optional[str] = None
+    groups: Optional[List[str]] = None
+    group: Optional[str] = None
     zone: Optional[str] = None
     port: Optional[int] = 5004
     hostname: Optional[str] = None
@@ -402,6 +418,7 @@ async def node_heartbeat(req: NodeHeartbeatRequest, request: Request):
     node = upsert_node_heartbeat(
         node_id=req.node_id,
         device_name=req.device_name or "",
+        groups=req.groups or req.group or req.zone,
         zone=req.zone or "",
         ip_address=client_ip,
         port=req.port or 5004,
@@ -409,10 +426,18 @@ async def node_heartbeat(req: NodeHeartbeatRequest, request: Request):
         force_update=bool(req.force_update)
     )
 
-    # Broadcast pembaruan speaker seketika ke Web Dashboard
+    # Broadcast pembaruan speaker & group seketika ke Web Dashboard
     await manager.broadcast({
         "type": "speakers_update",
         "speakers": get_all_speakers()
+    })
+    await manager.broadcast({
+        "type": "groups_update",
+        "groups": get_all_groups()
+    })
+    await manager.broadcast({
+        "type": "zones_update",
+        "zones": get_all_groups()
     })
 
     return {
@@ -425,30 +450,45 @@ def list_speakers():
     return get_all_speakers()
 
 @app.post("/api/speakers")
-def add_speaker(s: SpeakerCreate):
+async def add_speaker(s: SpeakerCreate):
     try:
-        new_id = create_speaker(s.name, s.ip_address, s.port, s.zone, s.device_type or "physical")
-        log_event("SPEAKER_ADDED", f"Menambah speaker '{s.name}' ({s.ip_address}) ke {s.zone}")
+        grps = parse_groups(s.groups if s.groups is not None else (s.group or s.zone or "Kantor"))
+        if not grps:
+            grps = ["Kantor"]
+        new_id = create_speaker(s.name, s.ip_address, s.port, groups=grps, zone=grps[0], device_type=s.device_type or "physical")
+        log_event("SPEAKER_ADDED", f"Menambah speaker '{s.name}' ({s.ip_address}) ke group: {', '.join(grps)}")
+        await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
+        await manager.broadcast({"type": "groups_update", "groups": get_all_groups()})
+        await manager.broadcast({"type": "zones_update", "zones": get_all_groups()})
         return {"message": "Speaker berhasil ditambahkan", "id": new_id}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Gagal menambah speaker: {e}")
 
 @app.put("/api/speakers/{speaker_id}")
-def edit_speaker(speaker_id: int, s: SpeakerUpdate):
+async def edit_speaker(speaker_id: int, s: SpeakerUpdate):
     existing = get_speaker_by_id(speaker_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Speaker tidak ditemukan")
-    update_speaker(speaker_id, s.name, s.ip_address, s.port, s.zone, s.enabled)
+    grps = parse_groups(s.groups if s.groups is not None else (s.group or s.zone or "Kantor"))
+    if not grps:
+        grps = ["Kantor"]
+    update_speaker(speaker_id, s.name, s.ip_address, s.port, groups=grps, zone=grps[0], enabled=s.enabled)
     log_event("SPEAKER_UPDATED", f"Memperbarui speaker '{s.name}' ({s.ip_address})")
+    await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
+    await manager.broadcast({"type": "groups_update", "groups": get_all_groups()})
+    await manager.broadcast({"type": "zones_update", "zones": get_all_groups()})
     return {"message": "Speaker berhasil diperbarui"}
 
 @app.delete("/api/speakers/{speaker_id}")
-def remove_speaker(speaker_id: int):
+async def remove_speaker(speaker_id: int):
     existing = get_speaker_by_id(speaker_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Speaker tidak ditemukan")
     delete_speaker(speaker_id)
     log_event("SPEAKER_DELETED", f"Menghapus speaker '{existing['name']}' ({existing['ip_address']})")
+    await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
+    await manager.broadcast({"type": "groups_update", "groups": get_all_groups()})
+    await manager.broadcast({"type": "zones_update", "zones": get_all_groups()})
     return {"message": "Speaker berhasil dihapus"}
 
 @app.post("/api/speakers/{speaker_id}/ping")
@@ -494,58 +534,84 @@ def test_speaker_audio_endpoint(speaker_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- ZONES MANAGEMENT ---
-class ZoneCreate(BaseModel):
+# --- GROUPS & ZONES MANAGEMENT ---
+class GroupCreate(BaseModel):
     name: str
     description: Optional[str] = ""
 
-class ZoneUpdate(BaseModel):
+class GroupUpdate(BaseModel):
     name: str
     description: Optional[str] = ""
+
+@app.get("/api/groups")
+def list_groups():
+    return get_all_groups()
+
+@app.post("/api/groups")
+async def add_group(g: GroupCreate):
+    name = g.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nama group tidak boleh kosong")
+    try:
+        new_id = create_group(name, g.description or "")
+        log_event("GROUP_CREATED", f"Menambah group baru: '{name}'")
+        await manager.broadcast({"type": "groups_update", "groups": get_all_groups()})
+        await manager.broadcast({"type": "zones_update", "zones": get_all_groups()})
+        return {"message": "Group berhasil ditambahkan", "id": new_id, "name": name}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gagal menambah group: {e}")
+
+@app.put("/api/groups/{group_name}")
+async def rename_group(group_name: str, g: GroupUpdate):
+    old_name = group_name.strip()
+    new_name = g.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Nama group baru tidak boleh kosong")
+    try:
+        update_group(old_name, new_name, g.description)
+        log_event("GROUP_RENAMED", f"Mengubah nama group '{old_name}' menjadi '{new_name}'")
+        await manager.broadcast({"type": "groups_update", "groups": get_all_groups()})
+        await manager.broadcast({"type": "zones_update", "zones": get_all_groups()})
+        await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
+        return {"message": "Group berhasil diperbarui", "name": new_name}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gagal memperbarui group: {e}")
+
+@app.delete("/api/groups/{group_name}")
+async def remove_group(group_name: str):
+    name = group_name.strip()
+    try:
+        delete_group(name)
+        log_event("GROUP_DELETED", f"Menghapus group '{name}'")
+        await manager.broadcast({"type": "groups_update", "groups": get_all_groups()})
+        await manager.broadcast({"type": "zones_update", "zones": get_all_groups()})
+        await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
+        return {"message": f"Group '{name}' berhasil dihapus"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gagal menghapus group: {e}")
+
+# Legacy Zone Endpoints (Alias ke Groups)
+class ZoneCreate(GroupCreate):
+    pass
+
+class ZoneUpdate(GroupUpdate):
+    pass
 
 @app.get("/api/zones")
 def list_zones():
-    return get_all_zones()
+    return get_all_groups()
 
 @app.post("/api/zones")
 async def add_zone(z: ZoneCreate):
-    name = z.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Nama zona tidak boleh kosong")
-    try:
-        new_id = create_zone(name, z.description or "")
-        log_event("ZONE_CREATED", f"Menambah zona baru: '{name}'")
-        await manager.broadcast({"type": "zones_update", "zones": get_all_zones()})
-        return {"message": "Zona berhasil ditambahkan", "id": new_id, "name": name}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Gagal menambah zona: {e}")
+    return await add_group(z)
 
 @app.put("/api/zones/{zone_name}")
 async def rename_zone(zone_name: str, z: ZoneUpdate):
-    old_name = zone_name.strip()
-    new_name = z.name.strip()
-    if not new_name:
-        raise HTTPException(status_code=400, detail="Nama zona baru tidak boleh kosong")
-    try:
-        update_zone(old_name, new_name, z.description)
-        log_event("ZONE_RENAMED", f"Mengubah nama zona '{old_name}' menjadi '{new_name}'")
-        await manager.broadcast({"type": "zones_update", "zones": get_all_zones()})
-        await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
-        return {"message": "Zona berhasil diperbarui", "name": new_name}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Gagal memperbarui zona: {e}")
+    return await rename_group(zone_name, z)
 
 @app.delete("/api/zones/{zone_name}")
 async def remove_zone(zone_name: str):
-    name = zone_name.strip()
-    try:
-        delete_zone(name)
-        log_event("ZONE_DELETED", f"Menghapus zona '{name}'")
-        await manager.broadcast({"type": "zones_update", "zones": get_all_zones()})
-        await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
-        return {"message": f"Zona '{name}' berhasil dihapus"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Gagal menghapus zona: {e}")
+    return await remove_group(zone_name)
 
 # --- SCHEDULES ---
 class ScheduleCreate(BaseModel):
@@ -558,6 +624,7 @@ class ScheduleCreate(BaseModel):
     target_multicast: bool = True
     target_local: bool = True
     target_mode: Optional[str] = "all"
+    target_group: Optional[str] = ""
     target_zone: Optional[str] = ""
     target_speaker_id: Optional[int] = 0
     enabled: bool = True
@@ -575,12 +642,13 @@ def list_schedules():
 
 @app.post("/api/schedules")
 def create_schedule(s: ScheduleCreate):
+    t_group = (s.target_group or s.target_zone or "").strip()
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO schedules (name, audio_file_id, schedule_type, time_str, days_of_week, interval_hours, target_multicast, target_local, target_mode, target_zone, target_speaker_id, enabled)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (s.name, s.audio_file_id, s.schedule_type, s.time_str, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", s.target_zone or "", s.target_speaker_id or 0, int(s.enabled)))
+            INSERT INTO schedules (name, audio_file_id, schedule_type, time_str, days_of_week, interval_hours, target_multicast, target_local, target_mode, target_group, target_zone, target_speaker_id, enabled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (s.name, s.audio_file_id, s.schedule_type, s.time_str, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, int(s.enabled)))
         conn.commit()
 
     reload_schedules()
@@ -589,14 +657,15 @@ def create_schedule(s: ScheduleCreate):
 
 @app.put("/api/schedules/{schedule_id}")
 def update_schedule(schedule_id: int, s: ScheduleCreate):
+    t_group = (s.target_group or s.target_zone or "").strip()
     with get_db() as conn:
         conn.execute("""
             UPDATE schedules 
             SET name = ?, audio_file_id = ?, schedule_type = ?, time_str = ?, 
                 days_of_week = ?, interval_hours = ?, target_multicast = ?, target_local = ?,
-                target_mode = ?, target_zone = ?, target_speaker_id = ?
+                target_mode = ?, target_group = ?, target_zone = ?, target_speaker_id = ?
             WHERE id = ?
-        """, (s.name, s.audio_file_id, s.schedule_type, s.time_str, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", s.target_zone or "", s.target_speaker_id or 0, schedule_id))
+        """, (s.name, s.audio_file_id, s.schedule_type, s.time_str, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, schedule_id))
         conn.commit()
 
     reload_schedules()

@@ -71,7 +71,16 @@ class AudioReceiver:
         self.server_url = self.config.get("server_url", "http://10.183.55.114:7080").rstrip("/")
         self.node_id = self.config.get("node_id", "")
         self.device_name = self.config.get("device_name", f"Terminal Audio ({socket.gethostname()})")
-        self.zone = self.config.get("zone", "Kantor & Kontrol")
+        raw_grps = self.config.get("groups") or self.config.get("zone") or ["Kantor"]
+        if isinstance(raw_grps, str):
+            self.groups = [g.strip() for g in raw_grps.split(",") if g.strip()]
+        elif isinstance(raw_grps, list):
+            self.groups = [str(g).strip() for g in raw_grps if str(g).strip()]
+        else:
+            self.groups = ["Kantor"]
+        if not self.groups:
+            self.groups = ["Kantor"]
+        self.zone = ", ".join(self.groups)
         self.multicast_ip = self.config.get("multicast_ip", "239.255.0.1")
         self.multicast_port = int(self.config.get("multicast_port", 5004))
         
@@ -83,6 +92,7 @@ class AudioReceiver:
         # Telemetri Auto-Discovery / Heartbeat
         self.server_connected = False
         self.registered_ip = ""
+        self.registered_groups = list(self.groups)
         self.registered_zone = self.zone
         self.last_heartbeat_time = 0
         self.last_heartbeat_error = ""
@@ -118,8 +128,12 @@ class AudioReceiver:
         if not cfg.get("device_name"):
             cfg["device_name"] = f"Terminal Audio ({socket.gethostname()})"
             changed = True
-        if not cfg.get("zone"):
-            cfg["zone"] = "Kantor & Kontrol"
+        if not cfg.get("groups") and not cfg.get("zone"):
+            cfg["groups"] = ["Kantor"]
+            cfg["zone"] = "Kantor"
+            changed = True
+        elif cfg.get("groups") and not cfg.get("zone"):
+            cfg["zone"] = ", ".join(cfg["groups"])
             changed = True
         if not cfg.get("multicast_ip"):
             cfg["multicast_ip"] = "239.255.0.1"
@@ -143,11 +157,19 @@ class AudioReceiver:
                 pass
         return cfg
 
-    def save_config(self, server_url, device_name, zone, ip, port):
+    def save_config(self, server_url, device_name, groups_or_zone, ip, port):
         """Menyimpan konfigurasi baru, me-restart socket receiver, dan mengirim heartbeat pembaruan ke server."""
         self.server_url = server_url.strip().rstrip("/")
         self.device_name = device_name.strip()
-        self.zone = zone.strip()
+        if isinstance(groups_or_zone, str):
+            self.groups = [g.strip() for g in groups_or_zone.split(",") if g.strip()]
+        elif isinstance(groups_or_zone, list):
+            self.groups = [str(g).strip() for g in groups_or_zone if str(g).strip()]
+        else:
+            self.groups = ["Kantor"]
+        if not self.groups:
+            self.groups = ["Kantor"]
+        self.zone = ", ".join(self.groups)
         self.multicast_ip = ip.strip()
         self.multicast_port = int(port)
             
@@ -155,6 +177,7 @@ class AudioReceiver:
             "server_url": self.server_url,
             "node_id": self.node_id,
             "device_name": self.device_name,
+            "groups": self.groups,
             "zone": self.zone,
             "multicast_ip": self.multicast_ip,
             "multicast_port": self.multicast_port,
@@ -188,6 +211,8 @@ class AudioReceiver:
         payload = {
             "node_id": self.node_id,
             "device_name": self.device_name,
+            "groups": self.groups,
+            "group": self.zone,
             "zone": self.zone,
             "port": self.multicast_port,
             "hostname": socket.gethostname(),
@@ -224,7 +249,8 @@ class AudioReceiver:
                     node_data = body.get("node", {})
                     self.server_connected = True
                     self.registered_ip = node_data.get("ip_address") or payload.get("client_ip", "")
-                    self.registered_zone = node_data.get("zone") or self.zone
+                    self.registered_groups = node_data.get("groups") or self.groups
+                    self.registered_zone = ", ".join(self.registered_groups) if isinstance(self.registered_groups, list) else (node_data.get("zone") or self.zone)
                     self.last_heartbeat_time = time.time()
                     self.last_heartbeat_error = ""
 
