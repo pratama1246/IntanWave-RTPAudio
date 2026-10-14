@@ -845,9 +845,16 @@ def delete_schedule(schedule_id: int):
     log_event("SCHEDULE_DELETED", f"Menghapus jadwal id {schedule_id}")
     return {"message": "Jadwal berhasil dihapus"}
 
+_last_manual_triggers = {}
+
 @app.post("/api/schedules/{schedule_id}/trigger")
 def trigger_schedule_manually(schedule_id: int):
     """Memicu jadwal berbunyi seketika sesuai target spesifik yang tersimpan di jadwal tersebut."""
+    now = time.time()
+    if _last_manual_triggers.get(schedule_id) and (now - _last_manual_triggers[schedule_id] < 1.5):
+        return {"message": "Permintaan beruntun diabaikan (anti dobel-klik)", "status": "debounced"}
+    _last_manual_triggers[schedule_id] = now
+
     with get_db() as conn:
         row = conn.execute("SELECT id, name FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
         if not row:

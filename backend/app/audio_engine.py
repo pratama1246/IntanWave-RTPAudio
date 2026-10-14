@@ -26,6 +26,8 @@ class AudioEngine:
         self.local_proc: Optional[subprocess.Popen] = None
         self.monitor_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._lock = threading.RLock()
+        self._last_test_cooldown = {}
         self.listeners: List[Callable[[dict], None]] = []
 
     def get_audio_duration(self, file_path: str) -> float:
@@ -95,17 +97,23 @@ class AudioEngine:
         Memulai playback ke target RTP (Multicast atau Selective Unicast via tee muxer)
         dan/atau Windows Audio lokal.
         """
-        self.stop()  # Hentikan stream yang sedang berjalan jika ada
+        with self._lock:
+            path_obj = Path(file_path)
+            now = time.time()
+            # Anti double-click: abaikan jika audio yang sama dipanggil berulang dalam tempo < 0.8s
+            if self.status == "STREAMING" and self.current_file == path_obj.name and (now - self.started_at < 0.8):
+                return
 
-        path_obj = Path(file_path)
-        if not path_obj.exists():
-            # Robust fallback jika file_path berupa path host OS lain (misal D:\... di Linux container)
-            alt_path = AUDIO_DIR / path_obj.name
-            if alt_path.exists():
-                path_obj = alt_path
-            else:
-                log_event("PLAYBACK_ERROR", f"File tidak ditemukan: {file_path} (maupun di {AUDIO_DIR})", level="ERROR")
-                raise FileNotFoundError(f"File audio '{path_obj.name}' tidak ditemukan di storage server")
+            self.stop()  # Hentikan stream yang sedang berjalan jika ada
+
+            if not path_obj.exists():
+                # Robust fallback jika file_path berupa path host OS lain (misal D:\... di Linux container)
+                alt_path = AUDIO_DIR / path_obj.name
+                if alt_path.exists():
+                    path_obj = alt_path
+                else:
+                    log_event("PLAYBACK_ERROR", f"File tidak ditemukan: {file_path} (maupun di {AUDIO_DIR})", level="ERROR")
+                    raise FileNotFoundError(f"File audio '{path_obj.name}' tidak ditemukan di storage server")
 
         settings = get_settings()
         mc_ip = settings.get("multicast_ip", DEFAULT_MULTICAST_IP)
@@ -236,9 +244,16 @@ class AudioEngine:
 
     def test_speaker_audio(self, ip: str, port: int = 5004, node_id: Optional[str] = None):
         """Memutar jingle test pendek langsung ke satu speaker tertentu (RTP untuk speaker fisik, HTTP stream untuk PC Node)."""
-        chime_path = AUDIO_DIR / "test_chime.wav"
-        if not chime_path.exists():
-            raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
+        with self._lock:
+            now = time.time()
+            cooldown_key = f"{ip}:{node_id or ''}"
+            if cooldown_key in self._last_test_cooldown and (now - self._last_test_cooldown[cooldown_key] < 1.5):
+                return
+            self._last_test_cooldown[cooldown_key] = now
+
+            chime_path = AUDIO_DIR / "test_chime.wav"
+            if not chime_path.exists():
+                raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
 
         # Cek apakah target adalah PC Node
         node_map = self._get_node_ip_map()
@@ -326,16 +341,17 @@ class AudioEngine:
 
     def stop(self):
         """Menghentikan seluruh pemutaran audio seketika."""
-        self._stop_event.set()
-        self._cleanup_processes()
-        was_streaming = (self.status == "STREAMING")
-        self.status = "IDLE"
-        self.current_category = "biasa"
-        self.started_at = 0.0
-        self.elapsed = 0.0
-        if was_streaming:
-            log_event("PLAYBACK_STOPPED", f"Siaran dihentikan manual: '{self.current_title}'")
-        self.notify_listeners()
+        with self._lock:
+            self._stop_event.set()
+            self._cleanup_processes()
+            was_streaming = (self.status == "STREAMING")
+            self.status = "IDLE"
+            self.current_category = "biasa"
+            self.started_at = 0.0
+            self.elapsed = 0.0
+            if was_streaming:
+                log_event("PLAYBACK_STOPPED", f"Siaran dihentikan manual: '{self.current_title}'")
+            self.notify_listeners()
 
     def _cleanup_processes(self):
         for proc in [self.multicast_proc, self.local_proc]:

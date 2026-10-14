@@ -623,6 +623,10 @@ export default function App() {
   const [pingingSpeakerId, setPingingSpeakerId] = useState(null);
   const [copiedSpeakerId, setCopiedSpeakerId] = useState(null);
   const [triggeringScheduleId, setTriggeringScheduleId] = useState(null);
+  const isActionBusyRef = useRef(false);
+  const [isPlayingToSpeakers, setIsPlayingToSpeakers] = useState(false);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [isSavingSpeaker, setIsSavingSpeaker] = useState(false);
 
   // Modals & Navigation
   const [activeMainTab, setActiveMainTab] = useState('schedules'); // 'schedules' | 'audio'
@@ -1166,6 +1170,9 @@ export default function App() {
 
   // Play audio to Outside Physical Speakers (Server Broadcast)
   const handlePlayToSpeakers = async (audioId) => {
+    if (isActionBusyRef.current) return;
+    isActionBusyRef.current = true;
+    setIsPlayingToSpeakers(true);
     handleStopBrowserPreview();
     try {
       const payload = { audio_id: audioId, enable_local: false, ...buildTargetPayload() };
@@ -1181,11 +1188,19 @@ export default function App() {
       fetchData();
     } catch (err) {
       alert('Gagal menyiarkan audio: ' + err);
+    } finally {
+      setTimeout(() => {
+        isActionBusyRef.current = false;
+        setIsPlayingToSpeakers(false);
+      }, 700);
     }
   };
 
   // Play audio filename to Outside Physical Speakers
   const handlePlayFilenameToSpeakers = async (filename) => {
+    if (isActionBusyRef.current) return;
+    isActionBusyRef.current = true;
+    setIsPlayingToSpeakers(true);
     handleStopBrowserPreview();
     try {
       const payload = { filename, enable_local: false, ...buildTargetPayload() };
@@ -1201,21 +1216,34 @@ export default function App() {
       fetchData();
     } catch (err) {
       alert('Gagal menyiarkan ke speaker: ' + err);
+    } finally {
+      setTimeout(() => {
+        isActionBusyRef.current = false;
+        setIsPlayingToSpeakers(false);
+      }, 700);
     }
   };
 
   // Stop Field Broadcast
   const handleStop = async () => {
+    if (isActionBusyRef.current) return;
+    isActionBusyRef.current = true;
     try {
       await fetch('/api/stop', { method: 'POST' });
       fetchData();
     } catch (err) {
       alert('Gagal menghentikan siaran: ' + err);
+    } finally {
+      setTimeout(() => {
+        isActionBusyRef.current = false;
+      }, 500);
     }
   };
 
   // Trigger Schedule Manually according to its own target
   const handleTriggerSchedule = async (schedule) => {
+    if (isActionBusyRef.current || triggeringScheduleId) return;
+    isActionBusyRef.current = true;
     handleStopBrowserPreview();
     setTriggeringScheduleId(schedule.id);
     try {
@@ -1230,12 +1258,16 @@ export default function App() {
     } catch (err) {
       alert('Gagal menyiarkan jadwal: ' + err);
     } finally {
-      setTimeout(() => setTriggeringScheduleId(null), 2500);
+      setTimeout(() => {
+        isActionBusyRef.current = false;
+        setTriggeringScheduleId(null);
+      }, 1500);
     }
   };
 
   // Trigger Scan All Speakers
   const handleScanAll = async () => {
+    if (isScanning || isActionBusyRef.current) return;
     setIsScanning(true);
     try {
       const res = await fetch('/api/speakers/scan', { method: 'POST' });
@@ -1252,6 +1284,8 @@ export default function App() {
 
   // Test Single Outside Physical Speaker
   const handleTestPhysicalSpeaker = async (speaker) => {
+    if (isActionBusyRef.current || testingSpeakerId) return;
+    isActionBusyRef.current = true;
     handleStopBrowserPreview();
     setTestingSpeakerId(speaker.id);
     try {
@@ -1259,7 +1293,10 @@ export default function App() {
     } catch (err) {
       alert(`Gagal tes suara ke ${speaker.name}: ${err}`);
     } finally {
-      setTimeout(() => setTestingSpeakerId(null), 2500);
+      setTimeout(() => {
+        isActionBusyRef.current = false;
+        setTestingSpeakerId(null);
+      }, 2000);
     }
   };
 
@@ -1369,6 +1406,8 @@ export default function App() {
   // Save Speaker (Create / Update)
   const handleSaveSpeaker = async (e) => {
     e.preventDefault();
+    if (isSavingSpeaker) return;
+    setIsSavingSpeaker(true);
     try {
       const parsedGrps = (speakerForm.groupsText || '')
         .split(',')
@@ -1402,6 +1441,8 @@ export default function App() {
       fetchData();
     } catch (err) {
       alert('Gagal menyimpan speaker: ' + err);
+    } finally {
+      setIsSavingSpeaker(false);
     }
   };
 
@@ -1512,6 +1553,8 @@ export default function App() {
   // Create or Update Schedule
   const handleSaveSchedule = async (e) => {
     e.preventDefault();
+    if (isSavingSchedule) return;
+    setIsSavingSchedule(true);
     try {
       if (editingScheduleId) {
         await fetch(`/api/schedules/${editingScheduleId}`, {
@@ -1531,6 +1574,8 @@ export default function App() {
       fetchData();
     } catch (err) {
       alert('Gagal menyimpan jadwal: ' + err);
+    } finally {
+      setIsSavingSchedule(false);
     }
   };
 
@@ -2906,9 +2951,10 @@ export default function App() {
                 </button>
                 <button 
                   type="submit" 
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-xs"
+                  disabled={isSavingSpeaker}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  {editingSpeaker ? 'Simpan' : 'Tambahkan'}
+                  {isSavingSpeaker ? 'Menyimpan...' : (editingSpeaker ? 'Simpan' : 'Tambahkan')}
                 </button>
               </div>
             </form>
@@ -3236,9 +3282,10 @@ export default function App() {
                 </button>
                 <button 
                   type="submit" 
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-xs"
+                  disabled={isSavingSchedule}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  Simpan Jadwal
+                  {isSavingSchedule ? 'Menyimpan...' : 'Simpan Jadwal'}
                 </button>
               </div>
             </form>
