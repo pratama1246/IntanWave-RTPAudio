@@ -217,7 +217,7 @@ class IntanWaveNodeWindow:
 
         self.lbl_bar_icon = tk.Label(
             self.bar_frame, 
-            text="⚪", 
+            text="●", 
             font=("Segoe UI", 10), 
             bg="#f1f5f9", 
             fg="#64748b"
@@ -257,6 +257,11 @@ class IntanWaveNodeWindow:
         self.entry_zone.insert(0, ", ".join(self.receiver.groups))
         self.entry_zone.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
+        ttk.Label(srv_grid, text="Volume Siaran (%):").grid(row=3, column=0, sticky=tk.W, pady=3)
+        self.entry_volume = ttk.Spinbox(srv_grid, from_=1, to=100, width=8)
+        self.entry_volume.set(str(self.receiver.config.get("volume", 21)))
+        self.entry_volume.grid(row=3, column=1, sticky=tk.W, padx=(8, 0), pady=3)
+
         # 3. Form Channel IP Phone Darurat (Opsional)
         cfg_frame = ttk.LabelFrame(main_frame, text=" Channel Telepon Darurat (Opsional) ", padding="12 10 12 10")
         cfg_frame.pack(fill=tk.X, pady=(0, 10))
@@ -284,7 +289,7 @@ class IntanWaveNodeWindow:
 
         self.lbl_server_status = ttk.Label(
             status_frame,
-            text="🟡 Menghubungkan ke Server PA...",
+            text="Menghubungkan ke Server PA...",
             font=("Segoe UI", 8, "bold"),
             foreground="#b45309"
         )
@@ -315,7 +320,7 @@ class IntanWaveNodeWindow:
 
         self.btn_test = ttk.Button(
             btn_box, 
-            text="🔔 Tes Bunyi Ampli", 
+            text="Tes Bunyi Ampli", 
             style="Action.TButton",
             command=self.receiver.play_test_chime
         )
@@ -343,6 +348,7 @@ class IntanWaveNodeWindow:
         new_name = self.entry_name.get().strip()
         new_zone = self.entry_zone.get().strip()
         new_sec = self.entry_secondary_ip.get().strip()
+        new_vol_str = self.entry_volume.get().strip()
 
         if not new_server:
             messagebox.showwarning("Peringatan", "URL Server PA Audio tidak boleh kosong.", parent=self.root)
@@ -353,16 +359,23 @@ class IntanWaveNodeWindow:
         if not new_zone:
             messagebox.showwarning("Peringatan", "Group Audio tidak boleh kosong.\n(Pisahkan koma jika > 1, misal: Kantor, Satpam)", parent=self.root)
             return
+        try:
+            val_vol = int(new_vol_str)
+            if not (1 <= val_vol <= 100):
+                raise ValueError
+        except Exception:
+            messagebox.showwarning("Peringatan", "Volume siaran harus berupa angka antara 1 sampai 100.", parent=self.root)
+            return
 
         # Sinkronkan status startup jika berbeda
         if self.var_startup.get() != is_startup_enabled():
             set_startup_enabled(self.var_startup.get())
 
-        self.receiver.save_config(new_server, new_name, new_zone, secondary_channel=new_sec)
+        self.receiver.save_config(new_server, new_name, new_zone, secondary_channel=new_sec, volume=val_vol)
         sec_msg = f"\nIP Phone: rtp://{new_sec}" if new_sec else ""
         messagebox.showinfo(
             "Berhasil", 
-            f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}{sec_msg}",
+            f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}\nVolume Siaran: {val_vol}%{sec_msg}",
             parent=self.root
         )
 
@@ -374,12 +387,12 @@ class IntanWaveNodeWindow:
                 grps = info.get("groups")
                 grps_str = ", ".join(grps) if isinstance(grps, list) else (info.get("zone") or self.receiver.zone)
                 self.lbl_server_status.config(
-                    text=f"🟢 Terdaftar di Server ({registered_ip}) • Group: {grps_str}",
+                    text=f"Terdaftar di Server ({registered_ip}) • Group: {grps_str}",
                     foreground="#0d7a3e"
                 )
             else:
                 self.lbl_server_status.config(
-                    text=f"🔴 Belum Terhubung ke Server ({self.receiver.server_url})",
+                    text=f"Belum Terhubung ke Server ({self.receiver.server_url})",
                     foreground="#c22525"
                 )
         self.root.after(0, _apply)
@@ -392,7 +405,7 @@ class IntanWaveNodeWindow:
                 bg_color = "#dc2626" if is_emergency else "#2563eb"
                 border_color = "#b91c1c" if is_emergency else "#1d4ed8"
                 fg_color = "#ffffff"
-                icon = "🚨" if is_emergency else "🔊"
+                icon = "[DARURAT]" if is_emergency else "[SIARAN]"
                 disp_title = f": {title}" if title else ""
                 bar_text = f"SIARAN DARURAT{disp_title}" if is_emergency else f"SEDANG MENERIMA SIARAN{disp_title}"
 
@@ -409,7 +422,7 @@ class IntanWaveNodeWindow:
                     self.show_window()
             else:
                 self.bar_frame.config(bg="#f1f5f9", highlightbackground="#e2e8f0")
-                self.lbl_bar_icon.config(text="⚪", bg="#f1f5f9", fg="#64748b")
+                self.lbl_bar_icon.config(text="●", bg="#f1f5f9", fg="#64748b")
                 self.lbl_bar_text.config(text="Standby • Menunggu Siaran", bg="#f1f5f9", fg="#64748b")
                 self.root.title("IntanWave Node")
                 if self.tray_icon:
@@ -433,7 +446,7 @@ class IntanWaveNodeWindow:
             pystray.MenuItem("IntanWave Node", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Buka Panel Kontrol", self.on_tray_show, default=True),
-            pystray.MenuItem("🔔 Tes Bunyi Ampli", lambda: self.receiver.play_test_chime()),
+            pystray.MenuItem("Tes Bunyi Ampli", lambda: self.receiver.play_test_chime()),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Keluar", self.on_tray_quit)
         )

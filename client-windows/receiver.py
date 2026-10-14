@@ -16,6 +16,8 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from winotify import Notification, audio
+import ctypes
+from ctypes import wintypes, POINTER, c_void_p, c_float, Structure, byref, WINFUNCTYPE, HRESULT
 
 # Refresh Windows Registry PATH
 if sys.platform == "win32":
@@ -73,6 +75,100 @@ def get_ffplay_bin():
     return "ffplay"
 
 
+class WindowsVolume:
+    """Kontrol Master Volume dan Mute Windows via COM IAudioEndpointVolume tanpa dependensi eksternal."""
+    @staticmethod
+    def _get_volume_interface():
+        if sys.platform != "win32":
+            return None, None, None
+        class GUID(Structure):
+            _fields_ = [
+                ('Data1', wintypes.DWORD),
+                ('Data2', wintypes.WORD),
+                ('Data3', wintypes.WORD),
+                ('Data4', wintypes.BYTE * 8)
+            ]
+            def __init__(self, s):
+                import uuid
+                u = uuid.UUID(s)
+                self.Data1 = u.time_low
+                self.Data2 = u.time_mid
+                self.Data3 = u.time_hi_version
+                self.Data4 = (wintypes.BYTE * 8)(*u.bytes[8:])
+
+        try:
+            ole32 = ctypes.windll.ole32
+            ole32.CoInitialize(None)
+
+            CLSID_MMDevEnum = GUID('{BCDE0395-E52F-467C-8E3D-C4579291692E}')
+            IID_IMMDevEnum = GUID('{A95664D2-9614-4F35-A746-DE8DB63617E6}')
+            IID_IAudioEndpointVolume = GUID('{5CDF2C82-841E-4546-9722-0CF74078229A}')
+
+            enum_ptr = c_void_p()
+            hr = ole32.CoCreateInstance(byref(CLSID_MMDevEnum), None, 1, byref(IID_IMMDevEnum), byref(enum_ptr))
+            if hr != 0:
+                return None, None, None
+
+            vtable = ctypes.cast(ctypes.cast(enum_ptr, POINTER(c_void_p)).contents, POINTER(c_void_p))
+            GetDefaultEndpointType = WINFUNCTYPE(HRESULT, c_void_p, wintypes.DWORD, wintypes.DWORD, POINTER(c_void_p))
+            dev_ptr = c_void_p()
+            hr = GetDefaultEndpointType(vtable[4])(enum_ptr, 0, 1, byref(dev_ptr))
+            
+            # Release enum_ptr
+            WINFUNCTYPE(wintypes.ULONG, c_void_p)(vtable[2])(enum_ptr)
+            if hr != 0:
+                return None, None, None
+
+            dev_vtable = ctypes.cast(ctypes.cast(dev_ptr, POINTER(c_void_p)).contents, POINTER(c_void_p))
+            ActivateType = WINFUNCTYPE(HRESULT, c_void_p, POINTER(GUID), wintypes.DWORD, c_void_p, POINTER(c_void_p))
+            vol_ptr = c_void_p()
+            hr = ActivateType(dev_vtable[3])(dev_ptr, byref(IID_IAudioEndpointVolume), 1, None, byref(vol_ptr))
+
+            # Release dev_ptr
+            WINFUNCTYPE(wintypes.ULONG, c_void_p)(dev_vtable[2])(dev_ptr)
+            if hr != 0:
+                return None, None, None
+
+            vol_vtable = ctypes.cast(ctypes.cast(vol_ptr, POINTER(c_void_p)).contents, POINTER(c_void_p))
+            return vol_ptr, vol_vtable, ole32
+        except Exception:
+            return None, None, None
+
+    @classmethod
+    def get_state(cls):
+        """Mengambil volume Windows (0.0 - 1.0) dan status mute (bool)."""
+        try:
+            vol_ptr, vol_vtable, ole32 = cls._get_volume_interface()
+            if not vol_ptr:
+                return None, None
+            v = c_float()
+            m = wintypes.BOOL()
+            WINFUNCTYPE(HRESULT, c_void_p, POINTER(c_float))(vol_vtable[9])(vol_ptr, byref(v))
+            WINFUNCTYPE(HRESULT, c_void_p, POINTER(wintypes.BOOL))(vol_vtable[15])(vol_ptr, byref(m))
+            WINFUNCTYPE(wintypes.ULONG, c_void_p)(vol_vtable[2])(vol_ptr)
+            ole32.CoUninitialize()
+            return v.value, bool(m.value)
+        except Exception:
+            return None, None
+
+    @classmethod
+    def set_state(cls, vol_scalar=None, muted=None):
+        """Menyetel volume Windows (0.0 - 1.0) dan status mute."""
+        try:
+            vol_ptr, vol_vtable, ole32 = cls._get_volume_interface()
+            if not vol_ptr:
+                return False
+            if muted is not None:
+                WINFUNCTYPE(HRESULT, c_void_p, wintypes.BOOL, c_void_p)(vol_vtable[14])(vol_ptr, wintypes.BOOL(muted), None)
+            if vol_scalar is not None:
+                WINFUNCTYPE(HRESULT, c_void_p, c_float, c_void_p)(vol_vtable[7])(vol_ptr, c_float(max(0.0, min(1.0, float(vol_scalar)))), None)
+            WINFUNCTYPE(wintypes.ULONG, c_void_p)(vol_vtable[2])(vol_ptr)
+            ole32.CoUninitialize()
+            return True
+        except Exception:
+            return False
+
+
 class AudioReceiver:
     """
     AudioReceiver IntanWave Node:
@@ -125,6 +221,8 @@ class AudioReceiver:
         self.active_source = None  # None | "HTTP" | "RTP"
         self.last_audio_time = 0.0
         self.last_toast_time = 0.0
+        self.prev_win_vol = None
+        self.prev_win_mute = None
 
         # Koneksi Jaringan
         self.stream_sock = None
@@ -243,7 +341,7 @@ class AudioReceiver:
             cfg["enable_toast"] = True
             changed = True
         if "volume" not in cfg:
-            cfg["volume"] = 100
+            cfg["volume"] = 21
             changed = True
 
         if changed:
@@ -255,7 +353,7 @@ class AudioReceiver:
                 pass
         return cfg
 
-    def save_config(self, server_url, device_name, groups_or_zone, ip=None, port=None, secondary_channel=""):
+    def save_config(self, server_url, device_name, groups_or_zone, ip=None, port=None, secondary_channel="", volume=None):
         """Menyimpan konfigurasi baru, me-restart listeners, dan mengirim heartbeat pembaruan ke server."""
         self.server_url = server_url.strip().rstrip("/")
         self.device_name = device_name.strip()
@@ -292,6 +390,13 @@ class AudioReceiver:
                 })
         self.channels = channels
 
+        vol = self.config.get("volume", 21)
+        if volume is not None:
+            try:
+                vol = max(1, min(100, int(volume)))
+            except Exception:
+                pass
+
         data = {
             "server_url": self.server_url,
             "node_id": self.node_id,
@@ -302,7 +407,7 @@ class AudioReceiver:
             "multicast_port": self.multicast_port,
             "channels": self.channels,
             "enable_toast": self.config.get("enable_toast", True),
-            "volume": self.config.get("volume", 100)
+            "volume": vol
         }
         self.config = data
 
@@ -454,6 +559,33 @@ class AudioReceiver:
         if self.on_status_change:
             self.on_status_change(new_status, self.current_category, self.current_title)
 
+    def _apply_broadcast_volume(self):
+        """Menyimpan volume & status mute Windows saat ini, lalu unmute dan set ke volume siaran."""
+        if self.prev_win_vol is not None:
+            return
+        try:
+            curr_vol, curr_mute = WindowsVolume.get_state()
+            if curr_vol is not None:
+                self.prev_win_vol = curr_vol
+                self.prev_win_mute = curr_mute
+                target_pct = int(self.config.get("volume", 21))
+                target_scalar = max(0.01, min(1.0, target_pct / 100.0))
+                WindowsVolume.set_state(vol_scalar=target_scalar, muted=False)
+        except Exception as e:
+            print("Gagal override volume Windows:", e)
+
+    def _restore_broadcast_volume(self):
+        """Mengembalikan volume dan status mute Windows persis ke setelan awal sebelum siaran."""
+        if self.prev_win_vol is None:
+            return
+        try:
+            WindowsVolume.set_state(vol_scalar=self.prev_win_vol, muted=self.prev_win_mute)
+        except Exception as e:
+            print("Gagal restore volume Windows:", e)
+        finally:
+            self.prev_win_vol = None
+            self.prev_win_mute = None
+
     def _start_player(self, codec="s16le", sample_rate=44100):
         """Menjalankan ffplay dengan konfigurasi ultra-low latency via pipe stdin."""
         if self.player_proc is not None and self.player_proc.poll() is None:
@@ -481,7 +613,7 @@ class AudioReceiver:
             "-analyzeduration", "0",
             "-fflags", "nobuffer",
             "-flags", "low_delay",
-            "-volume", str(vol),
+            "-volume", "100",
             "-f", codec_fmt,
             "-sample_rate", sr_str,
             "-ch_layout", "mono",
@@ -728,6 +860,7 @@ class AudioReceiver:
 
                         if self.active_source != "WS":
                             self.active_source = "WS"
+                            self._apply_broadcast_volume()
                             self.set_status("STREAMING", "biasa", "Siaran Server PA (HD)")
                             self.notify_toast("IntanWave — Siaran Server (HD)", f"Menerima siaran audio HD dari {self.server_url}")
                             threading.Thread(target=self._fetch_playback_info, daemon=True).start()
@@ -768,6 +901,7 @@ class AudioReceiver:
                     self.prebuf = []
                     self.prebuf_ready = False
                     self.set_status("STANDBY", "biasa", "")
+                    self._restore_broadcast_volume()
                 time.sleep(1.5)
 
     # =========================================================================
@@ -884,6 +1018,7 @@ class AudioReceiver:
 
         if self.active_source != "RTP":
             self.active_source = "RTP"
+            self._apply_broadcast_volume()
             ch_list = self.udp_sock_to_channel.get(sock, [])
             ch_name = ch_list[0]["name"] if ch_list else "Control Room IP Phone"
             self.set_status("STREAMING", "darurat", ch_name)
@@ -941,6 +1076,7 @@ class AudioReceiver:
                     self.prebuf_ready = False
                     self.active_source = None
                     self.set_status("STANDBY", "biasa", "")
+                    self._restore_broadcast_volume()
 
                     # Pastikan player standby tetap pre-warmed untuk siaran Server PA HD (s16le, 44100)
                     if not (self.player_proc and self.player_proc.poll() is None and self.player_codec == "s16le" and getattr(self, "player_sample_rate", 44100) == 44100):
@@ -972,6 +1108,7 @@ class AudioReceiver:
 
     def stop(self):
         self.is_running = False
+        self._restore_broadcast_volume()
         self._close_player()
 
         if self.stream_sock:
@@ -997,42 +1134,45 @@ class AudioReceiver:
         )
 
         def _play_audio():
-            candidates = [
-                EXE_DIR / "test_chime.wav",
-                BUNDLE_DIR / "test_chime.wav",
-                EXE_DIR / "_internal" / "test_chime.wav",
-                BUNDLE_DIR / "_internal" / "test_chime.wav",
-            ]
-            for candidate in candidates:
-                if candidate.exists():
-                    sound_path = str(candidate.resolve())
-                    if sys.platform == "win32":
+            self._apply_broadcast_volume()
+            try:
+                candidates = [
+                    EXE_DIR / "test_chime.wav",
+                    BUNDLE_DIR / "test_chime.wav",
+                    EXE_DIR / "_internal" / "test_chime.wav",
+                    BUNDLE_DIR / "_internal" / "test_chime.wav",
+                ]
+                for candidate in candidates:
+                    if candidate.exists():
+                        sound_path = str(candidate.resolve())
+                        if sys.platform == "win32":
+                            try:
+                                import winsound
+                                winsound.PlaySound(sound_path, winsound.SND_FILENAME | winsound.SND_NODEFAULT)
+                                return
+                            except Exception as e:
+                                print("Winsound error:", e)
+
                         try:
-                            import winsound
-                            winsound.PlaySound(sound_path, winsound.SND_FILENAME | winsound.SND_NODEFAULT)
+                            ffplay_bin = get_ffplay_bin()
+                            subprocess.run(
+                                [ffplay_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", "-volume", "100", sound_path],
+                                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+                                timeout=5
+                            )
                             return
                         except Exception as e:
-                            print("Winsound error:", e)
+                            print("FFplay chime error:", e)
 
+                if sys.platform == "win32":
                     try:
-                        ffplay_bin = get_ffplay_bin()
-                        vol = int(self.config.get("volume", 100))
-                        vol = max(0, min(100, vol))
-                        subprocess.run(
-                            [ffplay_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", "-volume", str(vol), sound_path],
-                            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-                            timeout=5
-                        )
-                        return
-                    except Exception as e:
-                        print("FFplay chime error:", e)
-
-            if sys.platform == "win32":
-                try:
-                    import winsound
-                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
-                except Exception:
-                    pass
+                        import winsound
+                        winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                    except Exception:
+                        pass
+            finally:
+                time.sleep(0.5)
+                self._restore_broadcast_volume()
 
         threading.Thread(target=_play_audio, daemon=True).start()
         return True
