@@ -1982,8 +1982,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans">
-      {/* 1. TOP HEADER (COMPACT & CLEAN) */}
-      <header className="bg-white border-b border-slate-200/90 sticky top-0 z-30 shadow-xs">
+      {/* STICKY TOP CONTAINER: HEADER + COLORBAR */}
+      <div className="sticky top-0 z-30 shadow-xs">
+        {/* 1. TOP HEADER (COMPACT & CLEAN) */}
+        <header className="bg-white border-b border-slate-200/90">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-15 flex items-center justify-between gap-4">
           {/* Logo & Online Quick Pill */}
           <div className="flex items-center gap-4">
@@ -2237,6 +2239,7 @@ export default function App() {
           </div>
         </div>
       </section>
+      </div>
 
       {/* 3. MAIN WORKSPACE (ALARM-FIRST CONSOLE) */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 flex-1 w-full space-y-4">
