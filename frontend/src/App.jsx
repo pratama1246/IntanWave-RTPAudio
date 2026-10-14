@@ -355,6 +355,16 @@ export default function App() {
     fetchData();
   }, []);
 
+  // Refetch logs whenever the audit modal is opened
+  useEffect(() => {
+    if (showLogsModal) {
+      fetch('/api/logs')
+        .then(r => r.json())
+        .then(data => setLogs(data || []))
+        .catch(err => console.error('Failed to fetch logs', err));
+    }
+  }, [showLogsModal]);
+
   // WebSocket Live Telemetry
   useEffect(() => {
     let ws;

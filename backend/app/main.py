@@ -776,7 +776,13 @@ def save_settings(payload: dict):
 @app.get("/api/logs")
 def get_logs():
     with get_db() as conn:
-        rows = conn.execute("SELECT * FROM logs ORDER BY id DESC LIMIT 50").fetchall()
+        rows = conn.execute("""
+            SELECT id, 
+                   COALESCE(datetime(timestamp, 'localtime'), timestamp) AS timestamp, 
+                   level, event, details 
+            FROM logs 
+            ORDER BY id DESC LIMIT 100
+        """).fetchall()
         return [dict(r) for r in rows]
 
 # --- STATIC FRONTEND ASSETS ---
