@@ -257,10 +257,27 @@ class IntanWaveNodeWindow:
         self.entry_zone.insert(0, ", ".join(self.receiver.groups))
         self.entry_zone.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
-        ttk.Label(srv_grid, text="Volume Siaran (%):").grid(row=3, column=0, sticky=tk.W, pady=3)
-        self.entry_volume = ttk.Spinbox(srv_grid, from_=1, to=100, width=8)
-        self.entry_volume.set(str(self.receiver.config.get("volume", 21)))
-        self.entry_volume.grid(row=3, column=1, sticky=tk.W, padx=(8, 0), pady=3)
+        ttk.Label(srv_grid, text="Volume Siaran:").grid(row=3, column=0, sticky=tk.W, pady=3)
+        vol_frame = ttk.Frame(srv_grid)
+        vol_frame.grid(row=3, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
+
+        self.var_volume = tk.IntVar(value=int(self.receiver.config.get("volume", 21)))
+        self.lbl_volume_val = ttk.Label(vol_frame, text=f"{self.var_volume.get()}%", width=5)
+
+        def _on_slider(val):
+            v = int(round(float(val)))
+            self.var_volume.set(v)
+            self.lbl_volume_val.config(text=f"{v}%")
+
+        self.slider_volume = ttk.Scale(
+            vol_frame,
+            from_=1,
+            to=100,
+            variable=self.var_volume,
+            command=_on_slider
+        )
+        self.slider_volume.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        self.lbl_volume_val.pack(side=tk.RIGHT)
 
         # 3. Form Channel IP Phone Darurat (Opsional)
         cfg_frame = ttk.LabelFrame(main_frame, text=" Channel Telepon Darurat (Opsional) ", padding="12 10 12 10")
@@ -348,7 +365,7 @@ class IntanWaveNodeWindow:
         new_name = self.entry_name.get().strip()
         new_zone = self.entry_zone.get().strip()
         new_sec = self.entry_secondary_ip.get().strip()
-        new_vol_str = self.entry_volume.get().strip()
+        val_vol = max(1, min(100, int(self.var_volume.get())))
 
         if not new_server:
             messagebox.showwarning("Peringatan", "URL Server PA Audio tidak boleh kosong.", parent=self.root)
@@ -358,13 +375,6 @@ class IntanWaveNodeWindow:
             return
         if not new_zone:
             messagebox.showwarning("Peringatan", "Group Audio tidak boleh kosong.\n(Pisahkan koma jika > 1, misal: Kantor, Satpam)", parent=self.root)
-            return
-        try:
-            val_vol = int(new_vol_str)
-            if not (1 <= val_vol <= 100):
-                raise ValueError
-        except Exception:
-            messagebox.showwarning("Peringatan", "Volume siaran harus berupa angka antara 1 sampai 100.", parent=self.root)
             return
 
         # Sinkronkan status startup jika berbeda
