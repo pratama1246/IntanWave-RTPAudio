@@ -49,6 +49,7 @@ def ensure_single_instance(on_show_callback):
 
 # Enable Per-Monitor DPI Awareness on Windows
 if sys.platform == "win32":
+    import winreg
     try:
         import ctypes
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -57,6 +58,67 @@ if sys.platform == "win32":
             ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
             pass
+
+REG_STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+REG_APP_NAME = "IntanWaveNode"
+
+
+def get_startup_target() -> str:
+    """Mengembalikan command line untuk dijalankan saat Windows startup."""
+    if getattr(sys, "frozen", False):
+        return f'"{Path(sys.executable).resolve()}" --minimized'
+
+    base_dir = Path(__file__).resolve().parent
+    exe_candidates = [
+        base_dir / "dist" / "IntanWave-Node" / "IntanWave-Node.exe",
+        base_dir / "IntanWave-Node" / "IntanWave-Node.exe",
+        base_dir / "IntanWave-Node.exe",
+    ]
+    for exe in exe_candidates:
+        if exe.exists():
+            return f'"{exe.resolve()}" --minimized'
+
+    bat_path = base_dir / "start_client.bat"
+    if bat_path.exists():
+        return f'"{bat_path.resolve()}" --minimized'
+
+    python_exe = sys.executable
+    pythonw = Path(python_exe).parent / "pythonw.exe"
+    if pythonw.exists():
+        python_exe = str(pythonw)
+    return f'"{python_exe}" "{Path(__file__).resolve()}" --minimized'
+
+
+def is_startup_enabled() -> bool:
+    """Cek apakah IntanWave Node terdaftar di Windows Run Registry."""
+    if sys.platform != "win32":
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_STARTUP_KEY, 0, winreg.KEY_READ) as key:
+            winreg.QueryValueEx(key, REG_APP_NAME)
+            return True
+    except Exception:
+        return False
+
+
+def set_startup_enabled(enabled: bool) -> bool:
+    """Tambah atau hapus IntanWave Node dari Windows Run Registry."""
+    if sys.platform != "win32":
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_STARTUP_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                cmd = get_startup_target()
+                winreg.SetValueEx(key, REG_APP_NAME, 0, winreg.REG_SZ, cmd)
+            else:
+                try:
+                    winreg.DeleteValue(key, REG_APP_NAME)
+                except FileNotFoundError:
+                    pass
+        return True
+    except Exception as e:
+        print(f"Error set_startup_enabled: {e}")
+        return False
 
 # Path resolution for standalone exe and development
 if getattr(sys, "frozen", False):
@@ -117,11 +179,15 @@ class IntanWaveNodeWindow:
         # Dynamic window geometry calculation: prevents clipping on high-DPI displays
         self.root.update_idletasks()
         req_w = max(420, self.root.winfo_reqwidth() + 20)
-        req_h = max(410, self.root.winfo_reqheight() + 20)
+        req_h = max(440, self.root.winfo_reqheight() + 20)
         self.root.geometry(f"{req_w}x{req_h}")
 
         # Handle window close (X) -> minimize to tray
         self.root.protocol("WM_DELETE_WINDOW", self.on_window_close)
+
+        # Jika dijalankan dari startup / flag --minimized, sembunyikan ke tray
+        if "--minimized" in sys.argv or "-m" in sys.argv:
+            self.root.withdraw()
 
 
     def init_ui(self):
@@ -214,7 +280,7 @@ class IntanWaveNodeWindow:
 
         # 4. Status Indikator Server (Live Heartbeat Badge)
         status_frame = ttk.Frame(main_frame)
-        status_frame.pack(fill=tk.X, pady=(0, 8))
+        status_frame.pack(fill=tk.X, pady=(0, 6))
 
         self.lbl_server_status = ttk.Label(
             status_frame,
@@ -224,7 +290,17 @@ class IntanWaveNodeWindow:
         )
         self.lbl_server_status.pack(anchor=tk.W)
 
-        # 5. Tombol Simpan
+        # 5. Opsi Windows Startup (Auto-start tanpa butuh installer)
+        self.var_startup = tk.BooleanVar(value=is_startup_enabled())
+        self.chk_startup = ttk.Checkbutton(
+            main_frame,
+            text="Jalankan otomatis saat Windows dinyalakan (Startup)",
+            variable=self.var_startup,
+            command=self.on_toggle_startup
+        )
+        self.chk_startup.pack(anchor=tk.W, pady=(0, 10))
+
+        # 6. Tombol Simpan
         self.btn_save = ttk.Button(
             main_frame, 
             style="Save.TButton",
@@ -233,7 +309,7 @@ class IntanWaveNodeWindow:
         )
         self.btn_save.pack(fill=tk.X, pady=(0, 10))
 
-        # 6. Action Buttons (Tes Bunyi Ampli & Sembunyikan)
+        # 7. Action Buttons (Tes Bunyi Ampli & Sembunyikan)
         btn_box = ttk.Frame(main_frame)
         btn_box.pack(fill=tk.X)
 
@@ -254,6 +330,14 @@ class IntanWaveNodeWindow:
         self.btn_hide.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
 
 
+    def on_toggle_startup(self):
+        """Handler saat checkbox startup diklik."""
+        enabled = self.var_startup.get()
+        success = set_startup_enabled(enabled)
+        if not success:
+            self.var_startup.set(not enabled)
+            messagebox.showwarning("Peringatan", "Gagal memperbarui pengaturan Windows Startup.", parent=self.root)
+
     def save_settings(self):
         new_server = self.entry_server.get().strip()
         new_name = self.entry_name.get().strip()
@@ -269,6 +353,10 @@ class IntanWaveNodeWindow:
         if not new_zone:
             messagebox.showwarning("Peringatan", "Group Audio tidak boleh kosong.\n(Pisahkan koma jika > 1, misal: Kantor, Satpam)", parent=self.root)
             return
+
+        # Sinkronkan status startup jika berbeda
+        if self.var_startup.get() != is_startup_enabled():
+            set_startup_enabled(self.var_startup.get())
 
         self.receiver.save_config(new_server, new_name, new_zone, secondary_channel=new_sec)
         sec_msg = f"\nIP Phone: rtp://{new_sec}" if new_sec else ""
