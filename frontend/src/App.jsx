@@ -58,13 +58,15 @@ function CustomDropdown({
   const safeOptions = Array.isArray(options) ? options : [];
   const selectedOption = safeOptions.find(opt => opt && String(opt.value) === String(value));
   const isDark = variant === 'dark';
+  const currentLabel = selectedOption ? selectedOption.label : placeholder;
 
   return (
-    <div className={`relative inline-block ${className}`} ref={dropdownRef}>
+    <div className={`relative ${className ? className : 'inline-block'} min-w-0`} ref={dropdownRef}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center justify-between gap-2 rounded-xl transition-all font-medium text-xs cursor-pointer outline-hidden select-none ${
+        title={currentLabel}
+        className={`flex items-center justify-between gap-2 rounded-xl transition-all font-medium text-xs cursor-pointer outline-hidden select-none min-w-0 overflow-hidden ${
           size === 'sm' ? 'px-2.5 py-1.5' : 'px-3 py-2'
         } ${
           isDark
@@ -72,9 +74,9 @@ function CustomDropdown({
             : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-white hover:border-slate-300 focus:ring-2 focus:ring-blue-500/20 shadow-2xs'
         } ${buttonClassName}`}
       >
-        <span className="truncate flex items-center gap-1.5">
+        <span className="min-w-0 flex-1 flex items-center gap-1.5 overflow-hidden">
           {selectedOption?.icon}
-          <span>{selectedOption ? selectedOption.label : placeholder}</span>
+          <span className="truncate block min-w-0">{currentLabel}</span>
         </span>
         <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${
           isDark ? 'text-slate-400' : 'text-slate-500'
@@ -217,12 +219,18 @@ function MultiTargetSelector({
     }
     if (selectedGroups.length > 0) {
       if (selectedGroups.length === 1) return `Group: ${selectedGroups[0]}`;
+      if (selectedGroups.length === 2) return `${selectedGroups[0]} + ${selectedGroups[1]}`;
       return `${selectedGroups.length} Group Terpilih`;
     }
     if (selectedSpeakerIds.length > 0) {
       if (selectedSpeakerIds.length === 1) {
         const sp = speakers.find(s => s.id === selectedSpeakerIds[0]);
         return sp ? `Speaker: ${sp.name}` : `1 Speaker Terpilih`;
+      }
+      if (selectedSpeakerIds.length === 2) {
+        const sp1 = speakers.find(s => s.id === selectedSpeakerIds[0]);
+        const sp2 = speakers.find(s => s.id === selectedSpeakerIds[1]);
+        return `${sp1?.name || 'Spk 1'} + ${sp2?.name || 'Spk 2'}`;
       }
       return `${selectedSpeakerIds.length} Speaker Terpilih`;
     }
@@ -315,11 +323,12 @@ function MultiTargetSelector({
   const isDark = variant === 'dark';
 
   return (
-    <div className={`relative inline-block ${className}`} ref={dropdownRef}>
+    <div className={`relative ${className ? className : 'inline-block'} min-w-0`} ref={dropdownRef}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center justify-between gap-2 rounded-xl transition-all font-medium text-xs cursor-pointer outline-hidden select-none ${
+        title={summaryLabel}
+        className={`flex items-center justify-between gap-2 rounded-xl transition-all font-medium text-xs cursor-pointer outline-hidden select-none min-w-0 overflow-hidden ${
           size === 'sm' ? 'px-2.5 py-1.5' : 'px-3 py-2'
         } ${
           isDark
@@ -327,7 +336,7 @@ function MultiTargetSelector({
             : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 focus:ring-2 focus:ring-blue-500/20 shadow-2xs'
         } ${buttonClassName}`}
       >
-        <span className="truncate flex items-center gap-1.5">
+        <span className="min-w-0 flex-1 flex items-center gap-1.5 overflow-hidden">
           {isAllSelected ? (
             <Radio className="w-3.5 h-3.5 text-blue-500 shrink-0" />
           ) : selectedGroups.length > 0 && selectedSpeakerIds.length > 0 ? (
@@ -337,7 +346,7 @@ function MultiTargetSelector({
           ) : (
             <Volume2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
           )}
-          <span className="truncate">{summaryLabel}</span>
+          <span className="truncate block min-w-0">{summaryLabel}</span>
         </span>
         <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${
           isDark ? 'text-slate-400' : 'text-slate-500'
@@ -987,19 +996,29 @@ export default function App() {
     if (targetMode === 'all') {
       return `Semua Speaker (${speakers.length} terdaftar • ${onlineCount} online)`;
     }
+    if (targetMode === 'hybrid') {
+      const grpPart = selectedGroups.length > 0 ? selectedGroups.join(', ') : '';
+      const spkPart = selectedSpeakerIds.length > 0 ? `${selectedSpeakerIds.length} Spk` : '';
+      return [grpPart, spkPart].filter(Boolean).join(' + ') || 'Semua Speaker';
+    }
     if (targetMode === 'group' || targetMode === 'zone') {
-      const grpSpeakers = speakers.filter(s => getSpeakerGroups(s).includes(selectedGroup));
+      const grp = selectedGroups[0] || selectedGroup;
+      const grpSpeakers = speakers.filter(s => getSpeakerGroups(s).includes(grp));
       const onCount = grpSpeakers.filter(s => s.status === 'online').length;
-      return `Group: ${selectedGroup} (${grpSpeakers.length} speaker • ${onCount} online)`;
+      return `Group: ${selectedGroups.length > 1 ? selectedGroups.join(', ') : grp} (${grpSpeakers.length} speaker • ${onCount} online)`;
     }
     if (targetMode === 'speaker') {
-      const sp = speakers.find(s => s.id === selectedSpeakerId);
+      if (selectedSpeakerIds.length > 1) {
+        return `${selectedSpeakerIds.length} Speaker Terpilih`;
+      }
+      const spId = selectedSpeakerIds[0] || selectedSpeakerId;
+      const sp = speakers.find(s => s.id === spId);
       if (sp) {
         return `Speaker ${sp.name} (${sp.status === 'online' ? 'Online' : 'Offline'})`;
       }
     }
     return 'Semua Speaker';
-  }, [targetMode, selectedGroup, selectedSpeakerId, speakers, onlineCount]);
+  }, [targetMode, selectedGroup, selectedGroups, selectedSpeakerId, selectedSpeakerIds, speakers, onlineCount]);
 
   // Direct Target Options: Hanya menampilkan Semua Speaker, Group yang memiliki speaker terdaftar, dan Speaker tunggal
   const targetOptions = useMemo(() => {
@@ -1845,6 +1864,51 @@ export default function App() {
     return s.schedule_type === 'daily' ? 'Setiap hari' : s.schedule_type;
   };
 
+  // Helper target label for schedule badge in table
+  const getScheduleTargetBadge = (s) => {
+    const grp = (s.target_group || s.target_zone || '').trim();
+    const rawSpkIds = (s.target_speakers ? s.target_speakers.split(',') : (s.target_speaker_id ? [s.target_speaker_id] : []))
+      .map(x => parseInt(String(x).trim(), 10))
+      .filter(Boolean);
+    const grpList = grp ? grp.split(',').map(x => x.trim()).filter(Boolean) : [];
+
+    if (s.target_mode === 'all' || (!grpList.length && !rawSpkIds.length)) {
+      return 'Semua Speaker';
+    }
+
+    // Hybrid: Group + Speaker
+    if (grpList.length > 0 && rawSpkIds.length > 0) {
+      if (grpList.length === 1 && rawSpkIds.length === 1) {
+        const sp = speakers.find(x => x.id === rawSpkIds[0]);
+        return `${grpList[0]} + ${sp?.name || `Spk ${rawSpkIds[0]}`}`;
+      }
+      return `${grpList.length} Group + ${rawSpkIds.length} Spk`;
+    }
+
+    // Group only
+    if (grpList.length > 0) {
+      if (grpList.length === 1) return `Group: ${grpList[0]}`;
+      if (grpList.length === 2) return `${grpList[0]} + ${grpList[1]}`;
+      return `${grpList.length} Group Terpilih`;
+    }
+
+    // Speaker only
+    if (rawSpkIds.length > 0) {
+      if (rawSpkIds.length === 1) {
+        const sp = speakers.find(x => x.id === rawSpkIds[0]);
+        return `Speaker: ${sp?.name || `ID ${rawSpkIds[0]}`}`;
+      }
+      if (rawSpkIds.length === 2) {
+        const sp1 = speakers.find(x => x.id === rawSpkIds[0]);
+        const sp2 = speakers.find(x => x.id === rawSpkIds[1]);
+        return `${sp1?.name || 'Spk 1'} + ${sp2?.name || 'Spk 2'}`;
+      }
+      return `${rawSpkIds.length} Speaker Terpilih`;
+    }
+
+    return 'Semua Speaker';
+  };
+
   const isPlaying = playback.status === 'STREAMING' || playback.status === 'PLAYING';
 
   const isEmergency = isPlaying && (
@@ -2029,7 +2093,7 @@ export default function App() {
                   groupsList={groupsList}
                   variant={isPlaying || isEmergency ? 'dark' : 'light'}
                   size="sm"
-                  buttonClassName="min-w-[160px]"
+                  buttonClassName="min-w-[150px] max-w-[220px] sm:max-w-[280px]"
                 />
 
                 {/* DENGAR DI WEB (PREVIEW BROWSER) */}
@@ -2284,30 +2348,35 @@ export default function App() {
                             </td>
 
                             {/* Nama Jadwal & Audio & Target */}
-                            <td className="py-3 px-4 min-w-0">
-                              <div className={`font-semibold text-sm leading-snug truncate ${
-                                s.enabled ? 'text-slate-900' : 'text-slate-500'
-                              }`}>
+                            <td className="py-3 px-4 min-w-0 max-w-[320px] lg:max-w-[420px]">
+                              <div 
+                                className={`font-semibold text-sm leading-snug truncate ${
+                                  s.enabled ? 'text-slate-900' : 'text-slate-500'
+                                }`}
+                                title={s.name}
+                              >
                                 {s.name}
                               </div>
-                              <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-1 truncate">
-                                <div className="flex items-center gap-1 truncate">
+                              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-1 min-w-0">
+                                <div 
+                                  className="flex items-center gap-1 min-w-0 max-w-[150px] sm:max-w-[200px] md:max-w-[260px] truncate"
+                                  title={s.audio_title || 'Audio default'}
+                                >
                                   <Music className="w-3 h-3 text-blue-500 shrink-0" />
                                   <span className="truncate">{s.audio_title || 'Audio default'}</span>
                                 </div>
-                                <span className="text-slate-300">•</span>
-                                <span className="inline-flex items-center text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60 shrink-0">
-                                  {(s.target_mode === 'group' || s.target_mode === 'zone') && (s.target_group || s.target_zone)
-                                    ? `Group: ${s.target_group || s.target_zone}`
-                                    : (s.target_mode === 'speaker' || s.target_mode === 'custom') && (s.target_speakers || s.target_speaker_id)
-                                    ? (() => {
-                                        const ids = (s.target_speakers ? s.target_speakers.split(',') : [s.target_speaker_id]).map(x => parseInt(String(x).trim(), 10)).filter(Boolean);
-                                        if (ids.length > 1) return `${ids.length} Speaker Terpilih`;
-                                        const found = speakers.find(sp => sp.id === ids[0]);
-                                        return `Speaker: ${found?.name || `ID ${ids[0]}`}`;
-                                      })()
-                                    : 'Semua Speaker'}
-                                </span>
+                                <span className="text-slate-300 shrink-0">•</span>
+                                {(() => {
+                                  const targetText = getScheduleTargetBadge(s);
+                                  return (
+                                    <span 
+                                      className="inline-flex items-center text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60 min-w-0 max-w-[130px] sm:max-w-[180px] shrink-0"
+                                      title={targetText}
+                                    >
+                                      <span className="truncate">{targetText}</span>
+                                    </span>
+                                  );
+                                })()}
                               </div>
                             </td>
 
@@ -2338,7 +2407,7 @@ export default function App() {
                                 <button 
                                   onClick={() => handleTriggerSchedule(s)}
                                   disabled={triggeringScheduleId === s.id}
-                                  title={`Uji siarkan jadwal "${s.name}" sekarang (ke target: ${s.target_mode === 'all' || !s.target_mode ? 'Semua Speaker' : (s.target_group || s.target_zone || s.target_speakers || 'Target Khusus')})`}
+                                  title={`Uji siarkan jadwal "${s.name}" sekarang (ke target: ${getScheduleTargetBadge(s)})`}
                                   className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
                                     triggeringScheduleId === s.id
                                       ? 'bg-blue-100 text-blue-700 animate-pulse'
