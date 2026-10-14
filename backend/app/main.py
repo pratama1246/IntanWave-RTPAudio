@@ -308,36 +308,55 @@ def play_audio(req: PlayRequest):
     target_endpoints = None
     target_desc = "Semua Speaker"
 
-    if req.target_mode in ("group", "zone") and (req.target_group or req.target_groups or req.target_zone):
-        raw_groups = list(req.target_groups or [])
-        if req.target_group:
-            raw_groups.extend([g.strip() for g in req.target_group.replace("[","").replace("]","").replace('"','').split(",") if g.strip()])
-        if req.target_zone:
-            raw_groups.extend([g.strip() for g in req.target_zone.replace("[","").replace("]","").replace('"','').split(",") if g.strip()])
-        target_groups = list(dict.fromkeys(raw_groups))
+    # Hybrid Target Resolution: Mendukung kombinasi group DAN speaker spesifik sekaligus
+    raw_groups = list(req.target_groups or [])
+    if req.target_group:
+        raw_groups.extend([g.strip() for g in req.target_group.replace("[","").replace("]","").replace('"','').split(",") if g.strip()])
+    if req.target_zone:
+        raw_groups.extend([g.strip() for g in req.target_zone.replace("[","").replace("]","").replace('"','').split(",") if g.strip()])
+    target_groups = list(dict.fromkeys(raw_groups))
 
+    raw_ids = list(req.speaker_ids or [])
+    if req.speaker_id and req.speaker_id not in raw_ids:
+        raw_ids.append(req.speaker_id)
+    target_speaker_ids = list(dict.fromkeys(raw_ids))
+
+    is_all_mode = (req.target_mode == "all" and not target_groups and not target_speaker_ids)
+
+    if not is_all_mode and (target_groups or target_speaker_ids):
+        matching_dict = {}
         with get_db() as conn:
-            rows = conn.execute("SELECT id, name, ip_address, port, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
-            matching_rows = []
-            for r in rows:
-                grps = parse_groups(r["groups"] or r["zone"])
-                if any(tg.lower() in [x.lower() for x in grps] or (r["zone"] and r["zone"].lower() == tg.lower()) for tg in target_groups):
-                    matching_rows.append(r)
-            if matching_rows:
-                target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in matching_rows]
-                target_desc = f"Group {', '.join(target_groups)} ({len(target_endpoints)} Speaker)"
-    elif (req.target_mode in ("speaker", "custom") or req.speaker_id or req.speaker_ids):
-        ids = list(req.speaker_ids or [])
-        if req.speaker_id and req.speaker_id not in ids:
-            ids.append(req.speaker_id)
-        if ids:
-            with get_db() as conn:
-                placeholders = ",".join(["?"] * len(ids))
-                rows = conn.execute(f"SELECT ip_address, port, name FROM speakers WHERE id IN ({placeholders}) AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", ids).fetchall()
-                if rows:
-                    target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in rows]
-                    target_desc = f"{len(rows)} Speaker Terpilih" if len(rows) > 1 else f"Speaker {rows[0]['name']}"
-    else:
+            all_spk_rows = conn.execute("SELECT id, name, ip_address, port, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
+            
+            # 1. Match berdasarkan Group
+            if target_groups:
+                for r in all_spk_rows:
+                    grps = parse_groups(r["groups"] or r["zone"])
+                    if any(tg.lower() in [x.lower() for x in grps] or (r["zone"] and r["zone"].lower() == tg.lower()) for tg in target_groups):
+                        matching_dict[r["id"]] = r
+
+            # 2. Match berdasarkan Speaker ID spesifik
+            if target_speaker_ids:
+                for r in all_spk_rows:
+                    if r["id"] in target_speaker_ids:
+                        matching_dict[r["id"]] = r
+
+        if matching_dict:
+            target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in matching_dict.values()]
+            desc_parts = []
+            if target_groups:
+                desc_parts.append(f"{len(target_groups)} Group ({', '.join(target_groups)})")
+            if target_speaker_ids:
+                spk_names = [r["name"] for r in matching_dict.values() if r["id"] in target_speaker_ids]
+                if len(target_speaker_ids) == 1 and spk_names:
+                    desc_parts.append(f"Speaker {spk_names[0]}")
+                else:
+                    desc_parts.append(f"{len(target_speaker_ids)} Speaker")
+            target_desc = " + ".join(desc_parts) + f" ({len(target_endpoints)} Speaker)"
+        else:
+            is_all_mode = True
+
+    if is_all_mode:
         # Mode "all" (Semua Speaker): Kirim ke seluruh IP speaker fisik terdaftar + Multicast
         with get_db() as conn:
             rows = conn.execute("SELECT ip_address, port FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()

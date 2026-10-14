@@ -3,7 +3,7 @@ import {
   ChevronDown, Play, Square, Volume2, Radio, Clock, Music, 
   Upload, Trash2, Settings, Plus, RefreshCw, Bell, 
   Siren, HardHat, Copy, History, X, Search, 
-  Wifi, Activity, Check,
+  Wifi, Activity, Check, Calendar,
   Headphones, Pause,
   Layers, Edit2, AlertTriangle, ArrowRight, Laptop, Users
 } from 'lucide-react';
@@ -137,34 +137,23 @@ function CustomDropdown({
   );
 }
 
-// REUSABLE MULTI-TARGET SELECTOR (BISA CENTANG MULTI GROUP ATAU MULTI SPEAKER)
+// REUSABLE MULTI-TARGET SELECTOR (BISA CENTANG GROUP + SPEAKER SEKALIGUS)
 function MultiTargetSelector({
-  targetMode = 'all', // 'all' | 'group' | 'speaker' (or 'custom')
+  targetMode = 'all', // 'all' | 'group' | 'speaker' | 'custom' | 'hybrid'
   selectedGroups = [], // string[]
   selectedSpeakerIds = [], // number[]
   onChange, // ({ targetMode, selectedGroups, selectedSpeakerIds }) => void
   speakers = [],
   groupsList = [],
-  variant = 'dark', // 'dark' | 'light'
+  variant = 'light', // 'dark' | 'light'
   size = 'sm',
   className = '',
   buttonClassName = '',
   placeholder = 'Pilih Target Siaran'
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState(() => {
-    if (targetMode === 'group') return 'group';
-    if (targetMode === 'speaker' || targetMode === 'custom') return 'speaker';
-    return 'all';
-  });
+  const [speakerSearch, setSpeakerSearch] = useState('');
   const dropdownRef = useRef(null);
-
-  // Sync activeTab when targetMode changes externally
-  useEffect(() => {
-    if (targetMode === 'group') setActiveTab('group');
-    else if (targetMode === 'speaker' || targetMode === 'custom') setActiveTab('speaker');
-    else setActiveTab('all');
-  }, [targetMode]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -201,18 +190,36 @@ function MultiTargetSelector({
   // Online count
   const onlineCount = useMemo(() => speakers.filter(s => s.status === 'online').length, [speakers]);
 
-  // Compute button label and icon
+  // Filtered speakers by search term
+  const filteredSpeakers = useMemo(() => {
+    if (!speakerSearch.trim()) return speakers;
+    const q = speakerSearch.toLowerCase();
+    return speakers.filter(s => 
+      (s.name && s.name.toLowerCase().includes(q)) || 
+      (s.ip_address && s.ip_address.includes(q)) ||
+      (s.zone && s.zone.toLowerCase().includes(q))
+    );
+  }, [speakers, speakerSearch]);
+
+  const isAllSelected = selectedGroups.length === 0 && selectedSpeakerIds.length === 0;
+
+  // Dynamic summary label on trigger button
   const summaryLabel = useMemo(() => {
-    if (targetMode === 'all') {
+    if (isAllSelected) {
       return `Semua Speaker (${speakers.length} spk)`;
     }
-    if (targetMode === 'group') {
-      if (selectedGroups.length === 0) return 'Pilih Group...';
+    if (selectedGroups.length > 0 && selectedSpeakerIds.length > 0) {
+      if (selectedGroups.length === 1 && selectedSpeakerIds.length === 1) {
+        const spk = speakers.find(s => s.id === selectedSpeakerIds[0]);
+        return `${selectedGroups[0]} + ${spk ? spk.name : '1 Spk'}`;
+      }
+      return `${selectedGroups.length} Group + ${selectedSpeakerIds.length} Spk`;
+    }
+    if (selectedGroups.length > 0) {
       if (selectedGroups.length === 1) return `Group: ${selectedGroups[0]}`;
       return `${selectedGroups.length} Group Terpilih`;
     }
-    if (targetMode === 'speaker' || targetMode === 'custom') {
-      if (selectedSpeakerIds.length === 0) return 'Pilih Speaker...';
+    if (selectedSpeakerIds.length > 0) {
       if (selectedSpeakerIds.length === 1) {
         const sp = speakers.find(s => s.id === selectedSpeakerIds[0]);
         return sp ? `Speaker: ${sp.name}` : `1 Speaker Terpilih`;
@@ -220,10 +227,10 @@ function MultiTargetSelector({
       return `${selectedSpeakerIds.length} Speaker Terpilih`;
     }
     return placeholder;
-  }, [targetMode, selectedGroups, selectedSpeakerIds, speakers, placeholder]);
+  }, [isAllSelected, selectedGroups, selectedSpeakerIds, speakers, placeholder]);
 
-  const handleSelectAllMode = () => {
-    setActiveTab('all');
+  // Handlers
+  const handleSelectAllGlobal = () => {
     onChange({
       targetMode: 'all',
       selectedGroups: [],
@@ -233,58 +240,74 @@ function MultiTargetSelector({
 
   const handleToggleGroup = (groupName) => {
     const exists = selectedGroups.includes(groupName);
-    const updated = exists 
+    const nextGroups = exists
       ? selectedGroups.filter(g => g !== groupName)
       : [...selectedGroups, groupName];
     
+    let nextMode = 'all';
+    if (nextGroups.length > 0 && selectedSpeakerIds.length > 0) nextMode = 'hybrid';
+    else if (nextGroups.length > 0) nextMode = 'group';
+    else if (selectedSpeakerIds.length > 0) nextMode = 'speaker';
+
     onChange({
-      targetMode: updated.length > 0 ? 'group' : 'all',
-      selectedGroups: updated,
-      selectedSpeakerIds: []
+      targetMode: nextMode,
+      selectedGroups: nextGroups,
+      selectedSpeakerIds
     });
   };
 
   const handleSelectAllGroups = () => {
+    const nextGroups = [...activeGroupsWithSpeakers];
+    const nextMode = selectedSpeakerIds.length > 0 ? 'hybrid' : 'group';
     onChange({
-      targetMode: 'group',
-      selectedGroups: [...activeGroupsWithSpeakers],
-      selectedSpeakerIds: []
+      targetMode: nextMode,
+      selectedGroups: nextGroups,
+      selectedSpeakerIds
     });
   };
 
   const handleClearGroups = () => {
+    const nextMode = selectedSpeakerIds.length > 0 ? 'speaker' : 'all';
     onChange({
-      targetMode: 'all',
+      targetMode: nextMode,
       selectedGroups: [],
-      selectedSpeakerIds: []
+      selectedSpeakerIds
     });
   };
 
   const handleToggleSpeaker = (spkId) => {
     const exists = selectedSpeakerIds.includes(spkId);
-    const updated = exists
+    const nextIds = exists
       ? selectedSpeakerIds.filter(id => id !== spkId)
       : [...selectedSpeakerIds, spkId];
 
+    let nextMode = 'all';
+    if (selectedGroups.length > 0 && nextIds.length > 0) nextMode = 'hybrid';
+    else if (nextIds.length > 0) nextMode = 'speaker';
+    else if (selectedGroups.length > 0) nextMode = 'group';
+
     onChange({
-      targetMode: updated.length > 0 ? 'speaker' : 'all',
-      selectedGroups: [],
-      selectedSpeakerIds: updated
+      targetMode: nextMode,
+      selectedGroups,
+      selectedSpeakerIds: nextIds
     });
   };
 
   const handleSelectAllSpeakers = () => {
+    const nextIds = speakers.map(s => s.id);
+    const nextMode = selectedGroups.length > 0 ? 'hybrid' : 'speaker';
     onChange({
-      targetMode: 'speaker',
-      selectedGroups: [],
-      selectedSpeakerIds: speakers.map(s => s.id)
+      targetMode: nextMode,
+      selectedGroups,
+      selectedSpeakerIds: nextIds
     });
   };
 
   const handleClearSpeakers = () => {
+    const nextMode = selectedGroups.length > 0 ? 'group' : 'all';
     onChange({
-      targetMode: 'all',
-      selectedGroups: [],
+      targetMode: nextMode,
+      selectedGroups,
       selectedSpeakerIds: []
     });
   };
@@ -301,140 +324,92 @@ function MultiTargetSelector({
         } ${
           isDark
             ? 'bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 hover:border-slate-600 focus:ring-1 focus:ring-blue-400 shadow-xs'
-            : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-white hover:border-slate-300 focus:ring-2 focus:ring-blue-500/20 shadow-2xs'
+            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 focus:ring-2 focus:ring-blue-500/20 shadow-2xs'
         } ${buttonClassName}`}
       >
         <span className="truncate flex items-center gap-1.5">
-          {targetMode === 'all' ? (
-            <Radio className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-          ) : targetMode === 'group' ? (
-            <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          {isAllSelected ? (
+            <Radio className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+          ) : selectedGroups.length > 0 && selectedSpeakerIds.length > 0 ? (
+            <Volume2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+          ) : selectedGroups.length > 0 ? (
+            <Users className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
           ) : (
-            <Volume2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <Volume2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
           )}
           <span className="truncate">{summaryLabel}</span>
         </span>
         <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${
           isDark ? 'text-slate-400' : 'text-slate-500'
-        } ${isOpen ? 'rotate-180 text-blue-400' : ''}`} />
+        } ${isOpen ? 'rotate-180 text-blue-500' : ''}`} />
       </button>
 
       {isOpen && (
         <div
-          className={`absolute left-0 top-full mt-1.5 w-80 max-w-[90vw] rounded-2xl p-3 z-50 shadow-2xl border animate-in fade-in zoom-in-95 duration-100 ${
+          className={`absolute left-0 top-full mt-1.5 w-84 sm:w-96 max-w-[95vw] rounded-2xl p-3.5 z-50 shadow-2xl border animate-in fade-in zoom-in-95 duration-100 ${
             isDark
               ? 'bg-slate-900 border-slate-700/80 text-slate-200 ring-1 ring-white/10'
               : 'bg-white border-slate-200 text-slate-700 shadow-xl'
           }`}
           style={{ minWidth: '320px' }}
         >
-          {/* Header Tabs */}
-          <div className={`flex items-center p-1 rounded-xl gap-1 mb-2.5 ${
-            isDark ? 'bg-slate-800/90 border border-slate-700/50' : 'bg-slate-100'
-          }`}>
-            <button
-              type="button"
-              onClick={handleSelectAllMode}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-center ${
-                activeTab === 'all'
-                  ? isDark ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-blue-600 shadow-xs'
-                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Semua
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('group');
-                if (targetMode !== 'group') {
-                  onChange({
-                    targetMode: 'group',
-                    selectedGroups: selectedGroups.length > 0 ? selectedGroups : (activeGroupsWithSpeakers.slice(0, 1)),
-                    selectedSpeakerIds: []
-                  });
-                }
-              }}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-center ${
-                activeTab === 'group'
-                  ? isDark ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-blue-600 shadow-xs'
-                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Per Group {selectedGroups.length > 0 ? `(${selectedGroups.length})` : ''}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('speaker');
-                if (targetMode !== 'speaker' && targetMode !== 'custom') {
-                  onChange({
-                    targetMode: 'speaker',
-                    selectedGroups: [],
-                    selectedSpeakerIds: selectedSpeakerIds.length > 0 ? selectedSpeakerIds : (speakers[0] ? [speakers[0].id] : [])
-                  });
-                }
-              }}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-center ${
-                activeTab === 'speaker'
-                  ? isDark ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-blue-600 shadow-xs'
-                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Per Speaker {selectedSpeakerIds.length > 0 ? `(${selectedSpeakerIds.length})` : ''}
-            </button>
+          {/* Header & Global Broadcast Option */}
+          <div className="mb-3">
+            <div className={`flex items-center justify-between pb-2 mb-2 border-b ${
+              isDark ? 'border-slate-800' : 'border-slate-100'
+            }`}>
+              <span className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                Target Siaran
+              </span>
+              <button
+                type="button"
+                onClick={handleSelectAllGlobal}
+                className={`text-[11px] px-2.5 py-1 rounded-lg font-medium cursor-pointer transition-colors ${
+                  isAllSelected
+                    ? 'bg-blue-600 text-white'
+                    : isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Semua Speaker (Global)
+              </button>
+            </div>
+            
+            <p className="text-[11px] text-slate-400">
+              Pilih group dan/atau speaker spesifik untuk siaran gabungan (contoh: 1 Group + 1 Speaker).
+            </p>
           </div>
 
-          {/* TAB CONTENT: SEMUA SPEAKER */}
-          {activeTab === 'all' && (
-            <div className="py-2 px-1 text-center space-y-2">
-              <div className={`p-3 rounded-xl border text-left ${
-                isDark ? 'bg-slate-800/50 border-slate-700/60' : 'bg-blue-50/50 border-blue-100'
-              }`}>
-                <div className="flex items-center gap-2 font-semibold text-xs text-blue-500">
-                  <Radio className="w-4 h-4 animate-pulse" />
-                  <span>Siaran Global Aktif</span>
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Audio akan dikirim ke seluruh speaker horn lapangan (Multicast RTP) dan seluruh PC kantor yang terhubung.
-                </p>
-                <div className="flex items-center gap-2 mt-2 text-[11px] font-medium text-slate-400">
-                  <span>{speakers.length} Speaker terdaftar</span>
-                  <span>•</span>
-                  <span className="text-emerald-500">{onlineCount} Online</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB CONTENT: PER GROUP (CHECKBOX MULTI) */}
-          {activeTab === 'group' && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] px-1">
-                <span className="text-slate-400 font-medium">Bisa centang lebih dari 1 group:</span>
+          <div className="max-h-72 overflow-y-auto space-y-3.5 pr-1">
+            {/* SEKSI 1: PILIH GROUP */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className={`font-semibold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  <Users className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Group / Area ({selectedGroups.length} dipilih)</span>
+                </span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={handleSelectAllGroups}
-                    className="text-blue-500 hover:underline cursor-pointer font-medium"
+                    className="text-blue-500 hover:underline cursor-pointer font-medium text-[10px]"
                   >
                     Pilih Semua
                   </button>
-                  <span className="text-slate-600">•</span>
+                  <span className="text-slate-400">•</span>
                   <button
                     type="button"
                     onClick={handleClearGroups}
-                    className="text-slate-400 hover:text-rose-400 cursor-pointer"
+                    className="text-slate-400 hover:text-rose-500 cursor-pointer text-[10px]"
                   >
-                    Reset
+                    Kosongkan
                   </button>
                 </div>
               </div>
 
-              <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 {activeGroupsWithSpeakers.length === 0 ? (
-                  <div className="text-center py-4 text-xs text-slate-400">
-                    Tidak ada group yang memiliki speaker aktif.
+                  <div className="col-span-2 text-center py-2 text-[11px] text-slate-400">
+                    Tidak ada group aktif.
                   </div>
                 ) : (
                   activeGroupsWithSpeakers.map((grp) => {
@@ -443,32 +418,31 @@ function MultiTargetSelector({
                       const sGrps = (s.groups && Array.isArray(s.groups) ? s.groups : [s.zone || '']).map(x => String(x).toLowerCase());
                       return sGrps.includes(grp.toLowerCase());
                     });
-                    const onCount = grpSpeakers.filter(s => s.status === 'online').length;
 
                     return (
                       <label
                         key={grp}
-                        className={`flex items-center justify-between gap-2.5 p-2 rounded-xl text-xs cursor-pointer transition-all border ${
+                        className={`flex items-center justify-between gap-1.5 p-2 rounded-xl text-xs cursor-pointer transition-all border ${
                           isChecked
                             ? isDark
                               ? 'bg-blue-950/40 border-blue-500/40 text-blue-200'
-                              : 'bg-blue-50 border-blue-200 text-blue-900'
+                              : 'bg-blue-50 border-blue-200 text-blue-900 font-medium'
                             : isDark
                               ? 'bg-slate-800/40 border-slate-700/40 text-slate-300 hover:bg-slate-800'
-                              : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50'
+                              : 'bg-white border-slate-200/80 text-slate-700 hover:bg-slate-50'
                         }`}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <input
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => handleToggleGroup(grp)}
-                            className="rounded border-slate-600 text-blue-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                            className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
                           />
-                          <span className="font-medium truncate">{grp}</span>
+                          <span className="truncate">{grp}</span>
                         </div>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-700/30 text-slate-400 shrink-0">
-                          {grpSpeakers.length} spk ({onCount} on)
+                        <span className="text-[10px] text-slate-400 shrink-0">
+                          {grpSpeakers.length} spk
                         </span>
                       </label>
                     );
@@ -476,53 +450,72 @@ function MultiTargetSelector({
                 )}
               </div>
             </div>
-          )}
 
-          {/* TAB CONTENT: PER SPEAKER (CHECKBOX MULTI) */}
-          {activeTab === 'speaker' && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] px-1">
-                <span className="text-slate-400 font-medium">Bisa centang lebih dari 1 speaker:</span>
+            {/* SEKSI 2: PILIH SPEAKER SPESIFIK */}
+            <div className={`space-y-1.5 pt-2.5 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className={`font-semibold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  <Volume2 className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Speaker Spesifik ({selectedSpeakerIds.length} dipilih)</span>
+                </span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={handleSelectAllSpeakers}
-                    className="text-blue-500 hover:underline cursor-pointer font-medium"
+                    className="text-blue-500 hover:underline cursor-pointer font-medium text-[10px]"
                   >
                     Pilih Semua
                   </button>
-                  <span className="text-slate-600">•</span>
+                  <span className="text-slate-400">•</span>
                   <button
                     type="button"
                     onClick={handleClearSpeakers}
-                    className="text-slate-400 hover:text-rose-400 cursor-pointer"
+                    className="text-slate-400 hover:text-rose-500 cursor-pointer text-[10px]"
                   >
-                    Reset
+                    Kosongkan
                   </button>
                 </div>
               </div>
 
-              <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
-                {speakers.length === 0 ? (
-                  <div className="text-center py-4 text-xs text-slate-400">
-                    Belum ada speaker terdaftar.
+              {/* Speaker Search bar */}
+              {speakers.length > 4 && (
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Cari speaker atau IP..."
+                    value={speakerSearch}
+                    onChange={(e) => setSpeakerSearch(e.target.value)}
+                    className={`w-full pl-8 pr-3 py-1.5 rounded-lg border text-xs outline-hidden ${
+                      isDark
+                        ? 'bg-slate-800/80 border-slate-700 text-slate-200 placeholder-slate-500 focus:border-blue-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400 focus:bg-white focus:border-blue-500'
+                    }`}
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1">
+                {filteredSpeakers.length === 0 ? (
+                  <div className="text-center py-2 text-[11px] text-slate-400">
+                    Tidak ada speaker yang sesuai pencarian.
                   </div>
                 ) : (
-                  speakers.map((spk) => {
+                  filteredSpeakers.map((spk) => {
                     const isChecked = selectedSpeakerIds.includes(spk.id);
                     const isOnline = spk.status === 'online';
 
                     return (
                       <label
                         key={spk.id}
-                        className={`flex items-center justify-between gap-2.5 p-2 rounded-xl text-xs cursor-pointer transition-all border ${
+                        className={`flex items-center justify-between gap-2 p-1.5 rounded-xl text-xs cursor-pointer transition-all border ${
                           isChecked
                             ? isDark
                               ? 'bg-blue-950/40 border-blue-500/40 text-blue-200'
-                              : 'bg-blue-50 border-blue-200 text-blue-900'
+                              : 'bg-blue-50 border-blue-200 text-blue-900 font-medium'
                             : isDark
                               ? 'bg-slate-800/40 border-slate-700/40 text-slate-300 hover:bg-slate-800'
-                              : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50'
+                              : 'bg-white border-slate-200/80 text-slate-700 hover:bg-slate-50'
                         }`}
                       >
                         <div className="flex items-center gap-2 min-w-0">
@@ -530,46 +523,46 @@ function MultiTargetSelector({
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => handleToggleSpeaker(spk.id)}
-                            className="rounded border-slate-600 text-blue-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                            className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
                           />
-                          <div className="min-w-0">
-                            <div className="font-medium truncate flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                              <span className="truncate">{spk.name}</span>
-                            </div>
-                            <span className="text-[10px] text-slate-400 font-mono block truncate">
-                              {spk.ip_address}
-                            </span>
-                          </div>
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                          <span className="truncate">{spk.name}</span>
                         </div>
-                        {spk.device_type === 'pc_node' && (
-                          <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
-                            PC
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {spk.device_type === 'pc_node' && (
+                            <span className="text-[9px] px-1 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">
+                              PC
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {spk.ip_address}
                           </span>
-                        )}
+                        </div>
                       </label>
                     );
                   })
                 )}
               </div>
             </div>
-          )}
+          </div>
 
           {/* Footer Popover */}
           <div className={`flex items-center justify-between pt-2.5 mt-2.5 border-t text-xs ${
             isDark ? 'border-slate-800' : 'border-slate-100'
           }`}>
-            <span className="text-[11px] text-slate-400 truncate max-w-[190px]">
-              {targetMode === 'all'
-                ? '🎯 Target: Semua Speaker'
-                : targetMode === 'group'
-                ? `👥 Target: ${selectedGroups.length} Group`
-                : `🔊 Target: ${selectedSpeakerIds.length} Speaker`}
+            <span className="text-[11px] text-slate-500 font-medium truncate max-w-[220px]">
+              {isAllSelected
+                ? 'Target: Semua Speaker'
+                : selectedGroups.length > 0 && selectedSpeakerIds.length > 0
+                ? `Target: ${selectedGroups.length} Group + ${selectedSpeakerIds.length} Speaker`
+                : selectedGroups.length > 0
+                ? `Target: ${selectedGroups.length} Group`
+                : `Target: ${selectedSpeakerIds.length} Speaker`}
             </span>
             <button
               type="button"
               onClick={() => setIsOpen(false)}
-              className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs cursor-pointer shadow-xs transition-colors"
+              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs cursor-pointer shadow-xs transition-colors"
             >
               Selesai
             </button>
@@ -1139,27 +1132,27 @@ export default function App() {
 
   const nextSchedule = getNextScheduleInfo();
 
-  // Helper build target payload for server broadcast
+  // Helper build target payload for server broadcast (Hybrid support)
   const buildTargetPayload = () => {
-    if (targetMode === 'group' || targetMode === 'zone') {
-      const grps = selectedGroups && selectedGroups.length > 0 ? selectedGroups : (selectedGroup ? [selectedGroup] : []);
-      return {
-        target_mode: 'group',
-        target_groups: grps,
-        target_group: grps.join(', '),
-        target_zone: grps.join(', ')
-      };
+    const hasGroups = selectedGroups && selectedGroups.length > 0;
+    const hasSpeakers = selectedSpeakerIds && selectedSpeakerIds.length > 0;
+
+    if (!hasGroups && !hasSpeakers) {
+      return { target_mode: 'all' };
     }
-    if (targetMode === 'speaker' || targetMode === 'custom') {
-      const ids = selectedSpeakerIds && selectedSpeakerIds.length > 0 ? selectedSpeakerIds : (selectedSpeakerId ? [selectedSpeakerId] : []);
-      return {
-        target_mode: ids.length > 1 ? 'custom' : 'speaker',
-        speaker_ids: ids,
-        speaker_id: ids[0] || null
-      };
-    }
+
+    let mode = 'all';
+    if (hasGroups && hasSpeakers) mode = 'hybrid';
+    else if (hasGroups) mode = 'group';
+    else if (hasSpeakers) mode = 'speaker';
+
     return {
-      target_mode: 'all'
+      target_mode: mode,
+      target_groups: selectedGroups || [],
+      target_group: (selectedGroups || []).join(', '),
+      target_zone: (selectedGroups || []).join(', '),
+      speaker_ids: selectedSpeakerIds || [],
+      speaker_id: (selectedSpeakerIds && selectedSpeakerIds[0]) ? selectedSpeakerIds[0] : null
     };
   };
 
@@ -1870,7 +1863,7 @@ export default function App() {
           ? 'bg-rose-700 text-white border-rose-800'
           : isPlaying 
             ? 'bg-blue-600 text-white border-blue-700' 
-            : 'bg-slate-900 text-slate-100 border-slate-950'
+            : 'bg-white text-slate-800 border-slate-200/90 shadow-2xs'
       }`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-15 flex items-center justify-between gap-3">
           {/* Status Pill & Live Info */}
@@ -1880,21 +1873,23 @@ export default function App() {
                 ? 'bg-rose-800 text-white border border-rose-500'
                 : isPlaying
                   ? 'bg-blue-700 text-white border border-blue-500'
-                  : 'bg-slate-800 text-emerald-400 border border-slate-700'
+                  : 'bg-slate-100 text-slate-700 border border-slate-200/90'
             }`}>
               <span className={`w-2 h-2 rounded-full ${
                 isEmergency 
                   ? 'bg-white animate-ping' 
                   : isPlaying 
                     ? 'bg-emerald-400 animate-pulse' 
-                    : 'bg-emerald-400'
+                    : 'bg-emerald-500'
               }`} />
               {isEmergency ? 'Darurat' : isPlaying ? 'Berbunyi' : 'Siaga'}
             </span>
 
-            <span className="text-slate-600 hidden md:inline">•</span>
+            <span className={`${isPlaying || isEmergency ? 'text-white/40' : 'text-slate-300'} hidden md:inline`}>•</span>
 
-            <h2 className="text-sm font-semibold text-white truncate max-w-xs sm:max-w-sm">
+            <h2 className={`text-sm font-semibold truncate max-w-xs sm:max-w-sm ${
+              isPlaying || isEmergency ? 'text-white' : 'text-slate-800'
+            }`}>
               {isPlaying ? playback.title : 'Server Siap Menyiarkan'}
             </h2>
           </div>
@@ -1938,10 +1933,10 @@ export default function App() {
                 {/* SOUNDBOARD MINI TRIGGER: PENGINGAT K3 */}
                 <button
                   onClick={() => handlePlayFilenameToSpeakers(settings.k3_audio_filename || 'safety_k3_chime.wav')}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-all border border-slate-700 cursor-pointer"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition-all border border-slate-200 shadow-2xs cursor-pointer"
                   title="Siarkan pengingat K3 ke speaker"
                 >
-                  <HardHat className="w-3.5 h-3.5 text-emerald-400" />
+                  <HardHat className="w-3.5 h-3.5 text-emerald-600" />
                   <span>K3</span>
                 </button>
 
@@ -1959,7 +1954,7 @@ export default function App() {
                   }}
                   speakers={speakers}
                   groupsList={groupsList}
-                  variant="dark"
+                  variant={isPlaying || isEmergency ? 'dark' : 'light'}
                   size="sm"
                   buttonClassName="min-w-[160px]"
                 />
@@ -1969,12 +1964,12 @@ export default function App() {
                   onClick={() => handleBrowserPreview('/api/audio/stream-file/test_chime.wav', 'global_bar')}
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all border cursor-pointer ${
                     previewingId === 'global_bar' && isPreviewPlaying
-                      ? 'bg-sky-500/20 text-sky-300 border-sky-400'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                      ? 'bg-sky-50 text-sky-700 border-sky-300'
+                      : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 shadow-2xs'
                   }`}
                   title="Dengarkan jingle di browser saja (tanpa suara ke speaker fisik luar)"
                 >
-                  <Headphones className="w-3.5 h-3.5 text-sky-400" />
+                  <Headphones className="w-3.5 h-3.5 text-sky-600" />
                   <span className="hidden lg:inline">{previewingId === 'global_bar' && isPreviewPlaying ? 'Hentikan' : 'Dengar Web'}</span>
                 </button>
               </>
@@ -1986,37 +1981,66 @@ export default function App() {
       {/* 3. MAIN WORKSPACE (ALARM-FIRST CONSOLE) */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 flex-1 w-full space-y-4">
         
-        {/* WAKTU SERVER */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-4 shadow-2xs flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-slate-100 text-slate-600 shrink-0">
-              <Clock className="w-5 h-5 text-slate-500" />
-            </div>
+        {/* WAKTU SERVER CARD (PROPORSIONAL, ELEGAN, TIDAK KURUS) */}
+        <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-2xs">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+            {/* Sisi Kiri: Waktu & Tanggal Server */}
             <div>
-              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 mb-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
                 <span>Waktu server</span>
               </div>
-              <div className="flex items-baseline gap-2 mt-0.5">
-                <div className="flex items-center text-2xl sm:text-3xl font-semibold text-slate-800 select-none">
-                  <span className="inline-block w-[1.2ch] text-center">{serverHours[0]}</span>
-                  <span className="inline-block w-[1.2ch] text-center">{serverHours[1]}</span>
+              
+              <div className="flex items-baseline gap-2">
+                <div className="flex items-center text-3xl sm:text-4xl md:text-5xl font-semibold text-slate-900 select-none tracking-tight">
+                  <span className="inline-block w-[1.1ch] text-center">{serverHours[0]}</span>
+                  <span className="inline-block w-[1.1ch] text-center">{serverHours[1]}</span>
                   <span className="inline-block w-[0.8ch] text-center text-slate-400">:</span>
-                  <span className="inline-block w-[1.2ch] text-center">{serverMinutes[0]}</span>
-                  <span className="inline-block w-[1.2ch] text-center">{serverMinutes[1]}</span>
+                  <span className="inline-block w-[1.1ch] text-center">{serverMinutes[0]}</span>
+                  <span className="inline-block w-[1.1ch] text-center">{serverMinutes[1]}</span>
                   <span className="inline-block w-[0.8ch] text-center text-slate-400">:</span>
-                  <span className="inline-block w-[1.2ch] text-center text-slate-500">{serverSeconds[0]}</span>
-                  <span className="inline-block w-[1.2ch] text-center text-slate-500">{serverSeconds[1]}</span>
+                  <span className="inline-block w-[1.1ch] text-center text-slate-500">{serverSeconds[0]}</span>
+                  <span className="inline-block w-[1.1ch] text-center text-slate-500">{serverSeconds[1]}</span>
                 </div>
-                <span className="text-xs font-medium text-slate-500">
+                <span className="text-sm font-semibold text-slate-400">
                   WIB
                 </span>
               </div>
-            </div>
-          </div>
 
-          <div className="text-xs text-slate-400 text-right hidden sm:block">
-            <span>{serverDateDisplay}</span>
+              <div className="flex items-center gap-2 mt-2 text-xs text-slate-500">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <span>{serverDateDisplay}</span>
+                <span className="text-slate-300">•</span>
+                <span>Waktu Indonesia Barat (UTC+7)</span>
+              </div>
+            </div>
+
+            {/* Sisi Kanan: Ringkasan Status Sistem (Mengisi Ruang agar Kokoh dan Tidak Kurus) */}
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 shrink-0">
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/80 border border-slate-200/60">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <Volume2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-400 font-medium">Speaker Aktif</div>
+                  <div className="text-sm font-semibold text-slate-800">
+                    {onlineCount} <span className="text-xs font-normal text-slate-400">/ {speakers.length} Online</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/80 border border-slate-200/60">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-400 font-medium">Jadwal Siaran</div>
+                  <div className="text-sm font-semibold text-slate-800">
+                    {schedules.filter(s => s.enabled).length} <span className="text-xs font-normal text-slate-400">Aktif</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2965,7 +2989,7 @@ export default function App() {
                   onChange={val => setNewSchedule({ ...newSchedule, audio_file_id: parseInt(val) })}
                   options={audioList.map(a => ({
                     value: a.id,
-                    label: a.category === 'darurat' ? `🔴 [Darurat] ${a.display_name}` : a.display_name,
+                    label: a.category === 'darurat' ? `[Darurat] ${a.display_name}` : a.display_name,
                     sublabel: `${a.category === 'darurat' ? 'Suara Darurat (EWS)' : 'Suara Biasa'} • ${a.filename} • ${formatSec(a.duration)}`
                   }))}
                   variant="light"
@@ -3701,7 +3725,7 @@ export default function App() {
                       options={audioList.map(a => ({
                         value: a.filename,
                         label: a.display_name,
-                        sublabel: `${a.category === 'darurat' ? '🔴 Darurat' : 'Biasa'} • ${a.filename}`,
+                        sublabel: `${a.category === 'darurat' ? 'Darurat (EWS)' : 'Biasa'} • ${a.filename}`,
                         icon: a.category === 'darurat' ? <Siren className="w-3.5 h-3.5 text-rose-500" /> : <Music className="w-3.5 h-3.5 text-slate-400" />
                       }))}
                       variant="light"
@@ -3722,7 +3746,7 @@ export default function App() {
                       options={audioList.map(a => ({
                         value: a.filename,
                         label: a.display_name,
-                        sublabel: `${a.category === 'darurat' ? '🔴 Darurat' : 'Biasa'} • ${a.filename}`,
+                        sublabel: `${a.category === 'darurat' ? 'Darurat (EWS)' : 'Biasa'} • ${a.filename}`,
                         icon: <HardHat className="w-3.5 h-3.5 text-emerald-500" />
                       }))}
                       variant="light"

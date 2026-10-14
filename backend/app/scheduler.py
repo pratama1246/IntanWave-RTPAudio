@@ -44,35 +44,53 @@ async def trigger_schedule_job(schedule_id: int):
         target_endpoints = None
         target_desc = "Semua Speaker"
 
-        if tmode in ("group", "zone") and tgroup:
+        raw_groups = []
+        if tgroup:
+            raw_groups.extend([g.strip() for g in tgroup.replace("[","").replace("]","").replace('"','').split(",") if g.strip()])
+        target_groups = list(dict.fromkeys(raw_groups))
+
+        raw_ids = []
+        if tspk_id:
+            raw_ids.append(int(tspk_id))
+        tspk_ids_str = row["target_speakers"] if "target_speakers" in row.keys() else ""
+        if tspk_ids_str:
+            for x in str(tspk_ids_str).split(","):
+                if x.strip().isdigit():
+                    raw_ids.append(int(x.strip()))
+        target_speaker_ids = list(dict.fromkeys(raw_ids))
+
+        is_all_mode = (tmode == "all" and not target_groups and not target_speaker_ids)
+
+        if not is_all_mode and (target_groups or target_speaker_ids):
+            matching_dict = {}
             with get_db() as conn:
-                sp_rows = conn.execute("SELECT id, ip_address, port, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
-                target_groups = [g.strip() for g in tgroup.replace("[","").replace("]","").replace('"','').split(",") if g.strip()]
-                matching_rows = []
-                for r in sp_rows:
-                    grps = parse_groups(r["groups"] or r["zone"])
-                    if any(tg.lower() in [x.lower() for x in grps] or (r["zone"] and r["zone"].lower() == tg.lower()) for tg in target_groups):
-                        matching_rows.append(r)
-                if matching_rows:
-                    target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in matching_rows]
-                    target_desc = f"Group {', '.join(target_groups)} ({len(target_endpoints)} Speaker)"
-        elif tmode in ("speaker", "custom") and (tspk_id or ("target_speakers" in row.keys() and row["target_speakers"])):
-            ids = set()
-            if tspk_id:
-                ids.add(int(tspk_id))
-            tspk_ids_str = row["target_speakers"] if "target_speakers" in row.keys() else ""
-            if tspk_ids_str:
-                for x in str(tspk_ids_str).split(","):
-                    if x.strip().isdigit():
-                        ids.add(int(x.strip()))
-            if ids:
-                with get_db() as conn:
-                    placeholders = ",".join(["?"] * len(ids))
-                    sp_rows = conn.execute(f"SELECT ip_address, port, name FROM speakers WHERE id IN ({placeholders}) AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", list(ids)).fetchall()
-                    if sp_rows:
-                        target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in sp_rows]
-                        target_desc = f"{len(sp_rows)} Speaker Terpilih" if len(sp_rows) > 1 else f"Speaker {sp_rows[0]['name']}"
-        else:
+                all_spk_rows = conn.execute("SELECT id, name, ip_address, port, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
+                if target_groups:
+                    for r in all_spk_rows:
+                        grps = parse_groups(r["groups"] or r["zone"])
+                        if any(tg.lower() in [x.lower() for x in grps] or (r["zone"] and r["zone"].lower() == tg.lower()) for tg in target_groups):
+                            matching_dict[r["id"]] = r
+                if target_speaker_ids:
+                    for r in all_spk_rows:
+                        if r["id"] in target_speaker_ids:
+                            matching_dict[r["id"]] = r
+
+            if matching_dict:
+                target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in matching_dict.values()]
+                desc_parts = []
+                if target_groups:
+                    desc_parts.append(f"{len(target_groups)} Group ({', '.join(target_groups)})")
+                if target_speaker_ids:
+                    spk_names = [r["name"] for r in matching_dict.values() if r["id"] in target_speaker_ids]
+                    if len(target_speaker_ids) == 1 and spk_names:
+                        desc_parts.append(f"Speaker {spk_names[0]}")
+                    else:
+                        desc_parts.append(f"{len(target_speaker_ids)} Speaker")
+                target_desc = " + ".join(desc_parts) + f" ({len(target_endpoints)} Speaker)"
+            else:
+                is_all_mode = True
+
+        if is_all_mode:
             with get_db() as conn:
                 sp_rows = conn.execute("SELECT ip_address, port FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
                 settings = get_settings()
