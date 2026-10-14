@@ -727,12 +727,52 @@ export default function App() {
 
   const fileInputRef = useRef(null);
 
-  // Realtime clock
+  // Server Time Synchronization & Display (Rock-solid, zero wobble, no font-mono)
+  const serverOffsetRef = useRef(0);
+  const [serverTimeDisplay, setServerTimeDisplay] = useState('');
+  const [serverDateDisplay, setServerDateDisplay] = useState('');
+
+  // Fetch initial server time offset
+  useEffect(() => {
+    const syncServerTime = async () => {
+      try {
+        const start = Date.now();
+        const res = await fetch('/api/time');
+        if (res.ok) {
+          const data = await res.json();
+          const latency = (Date.now() - start) / 2;
+          const serverMs = (data.timestamp * 1000) + latency;
+          serverOffsetRef.current = serverMs - Date.now();
+        }
+      } catch (err) {
+        console.error('Failed to sync server time', err);
+      }
+    };
+
+    syncServerTime();
+    // Sync every 3 minutes
+    const syncInterval = setInterval(syncServerTime, 3 * 60 * 1000);
+    return () => clearInterval(syncInterval);
+  }, []);
+
+  // Realtime clock ticking based on server offset
   useEffect(() => {
     const updateClock = () => {
-      const now = new Date();
-      setCurrentTime(now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB');
+      const serverNow = new Date(Date.now() + serverOffsetRef.current);
+      const hours = String(serverNow.getHours()).padStart(2, '0');
+      const minutes = String(serverNow.getMinutes()).padStart(2, '0');
+      const seconds = String(serverNow.getSeconds()).padStart(2, '0');
+      setServerTimeDisplay(`${hours}:${minutes}:${seconds}`);
+      setCurrentTime(`${hours}:${minutes}:${seconds} WIB`);
+
+      setServerDateDisplay(serverNow.toLocaleDateString('id-ID', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      }));
     };
+
     updateClock();
     const timer = setInterval(updateClock, 1000);
     return () => clearInterval(timer);
@@ -1786,11 +1826,6 @@ export default function App() {
 
           {/* Right Tools */}
           <div className="flex items-center gap-2.5">
-            {/* Live Clock */}
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold">
-              <Clock className="w-3.5 h-3.5 text-slate-500" />
-              <span>{currentTime}</span>
-            </div>
 
             {/* Server Connection Indicator */}
             <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
@@ -1945,6 +1980,54 @@ export default function App() {
       {/* 3. MAIN WORKSPACE (ALARM-FIRST CONSOLE) */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 flex-1 w-full space-y-4">
         
+        {/* MASTER SERVER CLOCK (SINKRON SERVER, BESAR, SANS PROPORSIONAL, ZERO-JITTER TABULAR) */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-2xl bg-blue-50 border border-blue-100/80 text-blue-600 shrink-0">
+              <Clock className="w-8 h-8" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                  Waktu Server Master (Pelindo Tanjung Intan)
+                </span>
+              </div>
+              <div className="flex items-baseline gap-2.5 mt-0.5">
+                <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight tabular-nums select-none">
+                  {serverTimeDisplay || '12:00:00'}
+                </span>
+                <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
+                  WIB (UTC+7)
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {serverDateDisplay} • Waktu sinkron otomatis dengan jadwal siaran
+              </p>
+            </div>
+          </div>
+
+          {/* Info Siaran Terjadwal Berikutnya */}
+          {nextSchedule && (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200/70 sm:max-w-xs w-full sm:w-auto">
+              <div className="p-2 rounded-lg bg-blue-100/70 text-blue-700 shrink-0">
+                <Bell className="w-4 h-4 animate-bounce" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] font-medium text-slate-400 block truncate">
+                  Siaran Terjadwal Berikutnya:
+                </span>
+                <span className="text-xs font-bold text-slate-800 truncate block">
+                  {nextSchedule.name} • {nextSchedule.time_str} WIB
+                </span>
+                <span className="text-[10px] text-blue-600 font-semibold block truncate">
+                  {nextSchedule.countdown}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* TAB NAVIGATION & PRIMARY ACTIONS */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Segmented Tab View */}
@@ -2764,32 +2847,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Uji Ping Sebelum Simpan */}
-              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-2">
-                  <Activity className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="text-slate-600 font-medium">Tes IP:</span>
-                  {modalPingStatus.result && (
-                    <span className={`font-semibold ${
-                      modalPingStatus.result.online ? 'text-emerald-600' : 'text-rose-600'
-                    }`}>
-                      {modalPingStatus.result.online 
-                        ? `Online (${modalPingStatus.result.latency}ms)` 
-                        : 'Offline'}
-                    </span>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleTestModalPing}
-                  disabled={modalPingStatus.testing || !speakerForm.ip_address}
-                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium text-xs transition-colors disabled:opacity-50"
-                >
-                  {modalPingStatus.testing ? 'Menguji...' : 'Uji Ping'}
-                </button>
-              </div>
-
               <div className="pt-1.5 flex justify-end gap-2">
                 <button 
                   type="button" 
@@ -2843,23 +2900,18 @@ export default function App() {
               </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-slate-500 font-medium shrink-0">Berkas Suara:</span>
-                {emergencyAudios.length > 1 ? (
-                  <select
-                    value={selectedEmergencyAudio || settings.siren_audio_filename || emergencyAudios[0]?.filename || 'sirine_ews_test.wav'}
-                    onChange={e => setSelectedEmergencyAudio(e.target.value)}
-                    className="px-2 py-1 rounded-lg border border-rose-300 bg-white text-xs text-rose-700 font-semibold outline-hidden"
-                  >
-                    {emergencyAudios.map(ea => (
-                      <option key={ea.id} value={ea.filename}>
-                        {ea.display_name} ({ea.filename})
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="font-semibold text-rose-600">
-                    {emergencyAudios.find(a => a.filename === settings.siren_audio_filename)?.display_name || emergencyAudios[0]?.display_name || settings.siren_audio_filename || 'sirine_ews_test.wav'}
-                  </span>
-                )}
+                <CustomDropdown
+                  value={selectedEmergencyAudio || settings.siren_audio_filename || emergencyAudios[0]?.filename || 'sirine_ews_test.wav'}
+                  onChange={val => setSelectedEmergencyAudio(val)}
+                  options={emergencyAudios.map(ea => ({
+                    value: ea.filename,
+                    label: `${ea.display_name} (${ea.filename})`,
+                    icon: <Siren className="w-3.5 h-3.5 text-rose-500" />
+                  }))}
+                  variant="light"
+                  size="sm"
+                  buttonClassName="bg-white border-rose-200 text-rose-700 min-w-[200px]"
+                />
               </div>
             </div>
 
@@ -3647,58 +3699,44 @@ export default function App() {
                 <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
                   {/* Pilihan Audio Sirine */}
                   <div>
-                    <div className="flex items-center gap-1.5 mb-1 text-xs font-medium text-slate-700">
+                    <div className="flex items-center gap-1.5 mb-1.5 text-xs font-medium text-slate-700">
                       <Siren className="w-3.5 h-3.5 text-rose-500" />
                       <span>Audio Tombol Sirine:</span>
                     </div>
-                    <select
+                    <CustomDropdown
                       value={settings.siren_audio_filename || 'sirine_ews_test.wav'}
-                      onChange={e => setSettings({ ...settings, siren_audio_filename: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-800 focus:ring-2 focus:ring-rose-500 outline-hidden"
-                    >
-                      <optgroup label="Audio Darurat / Sirine">
-                        {audioList.filter(a => a.category === 'darurat').map(a => (
-                          <option key={a.id} value={a.filename}>
-                            {a.display_name} ({a.filename})
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Audio Biasa / Lainnya">
-                        {audioList.filter(a => a.category !== 'darurat').map(a => (
-                          <option key={a.id} value={a.filename}>
-                            {a.display_name} ({a.filename})
-                          </option>
-                        ))}
-                      </optgroup>
-                    </select>
+                      onChange={val => setSettings({ ...settings, siren_audio_filename: val })}
+                      options={audioList.map(a => ({
+                        value: a.filename,
+                        label: a.display_name,
+                        sublabel: `${a.category === 'darurat' ? '🔴 Darurat' : 'Biasa'} • ${a.filename}`,
+                        icon: a.category === 'darurat' ? <Siren className="w-3.5 h-3.5 text-rose-500" /> : <Music className="w-3.5 h-3.5 text-slate-400" />
+                      }))}
+                      variant="light"
+                      className="w-full"
+                      buttonClassName="w-full bg-white justify-between"
+                    />
                   </div>
 
                   {/* Pilihan Audio K3 */}
                   <div>
-                    <div className="flex items-center gap-1.5 mb-1 text-xs font-medium text-slate-700">
+                    <div className="flex items-center gap-1.5 mb-1.5 text-xs font-medium text-slate-700">
                       <HardHat className="w-3.5 h-3.5 text-emerald-500" />
                       <span>Audio Tombol K3:</span>
                     </div>
-                    <select
+                    <CustomDropdown
                       value={settings.k3_audio_filename || 'safety_k3_chime.wav'}
-                      onChange={e => setSettings({ ...settings, k3_audio_filename: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-hidden"
-                    >
-                      <optgroup label="Audio Rekomendasi K3 / Biasa">
-                        {audioList.filter(a => a.category !== 'darurat').map(a => (
-                          <option key={a.id} value={a.filename}>
-                            {a.display_name} ({a.filename})
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Audio Darurat">
-                        {audioList.filter(a => a.category === 'darurat').map(a => (
-                          <option key={a.id} value={a.filename}>
-                            {a.display_name} ({a.filename})
-                          </option>
-                        ))}
-                      </optgroup>
-                    </select>
+                      onChange={val => setSettings({ ...settings, k3_audio_filename: val })}
+                      options={audioList.map(a => ({
+                        value: a.filename,
+                        label: a.display_name,
+                        sublabel: `${a.category === 'darurat' ? '🔴 Darurat' : 'Biasa'} • ${a.filename}`,
+                        icon: <HardHat className="w-3.5 h-3.5 text-emerald-500" />
+                      }))}
+                      variant="light"
+                      className="w-full"
+                      buttonClassName="w-full bg-white justify-between"
+                    />
                   </div>
                 </div>
               </div>

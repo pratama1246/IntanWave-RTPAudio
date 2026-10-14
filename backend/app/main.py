@@ -779,6 +779,16 @@ def save_settings(payload: dict):
     update_settings(payload)
     return {"message": "Pengaturan disimpan", "settings": get_settings()}
 
+@app.get("/api/time")
+def get_server_time():
+    now = datetime.now()
+    return {
+        "time": now.strftime("%H:%M:%S"),
+        "date": now.strftime("%Y-%m-%d"),
+        "timestamp": now.timestamp(),
+        "timezone": "WIB"
+    }
+
 @app.get("/api/logs")
 def get_logs():
     with get_db() as conn:
