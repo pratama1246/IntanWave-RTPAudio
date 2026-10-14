@@ -33,6 +33,7 @@ client-windows/IntanWave-Node/
 *.log
 .env
 .env.local
+backend/storage/audio/*.mp3
 
 # IDE / System
 .vscode/

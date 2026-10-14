@@ -392,5 +392,7 @@ class AudioEngine:
                 stream_hub.publish(chunk)
         except Exception:
             pass
+        finally:
+            stream_hub.end()
 
 audio_engine = AudioEngine()

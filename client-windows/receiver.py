@@ -177,7 +177,7 @@ class AudioReceiver:
     2. Siaran Darurat IP Phone Control Room tetap diterima lewat socket UDP Multicast sekunder (RTP).
     3. Output dipipa langsung ke ffplay secara non-blocking dengan buffer adaptif ~120ms (tahan jitter WiFi).
     """
-    PREBUFFER_PACKETS = 2  # 2 paket x 20ms = ~40ms initial prebuffer (latensi ultra-rendah & instan)
+    PREBUFFER_PACKETS = 6  # 6 paket x 20ms = ~120ms initial prebuffer (tahan jitter WiFi kantor)
 
     def __init__(self, on_status_change=None, on_heartbeat_change=None):
         self.config = self.load_config()
@@ -586,6 +586,39 @@ class AudioReceiver:
             self.prev_win_vol = None
             self.prev_win_mute = None
 
+    def _on_stream_end(self):
+        """
+        Menangani akhir siaran audio secara mulus:
+        1. Flush sisa prebuffer jika ada ke player stdin.
+        2. Tulis silence padding ~40ms ke stdin player untuk membersihkan buffer ring WASAPI/SDL
+           tanpa memicu glitch atau memutar ulang artefak suara akhir.
+        3. Kembalikan status ke STANDBY dan pulihkan volume master Windows ke level semula.
+        4. Pastikan audio player tetap pre-warmed dalam mode s16le 44100Hz untuk siaran berikutnya.
+        """
+        if self.status != "STREAMING" and self.active_source is None:
+            return
+
+        if self.player_proc and self.player_proc.stdin and self.player_proc.poll() is None:
+            try:
+                if self.prebuf:
+                    self.player_proc.stdin.write(b"".join(self.prebuf))
+                silence_len = 3528 if self.player_codec == "s16le" else 320
+                silence_val = b"\x00" if self.player_codec != "alaw" else b"\xd5"
+                self.player_proc.stdin.write(silence_val * silence_len)
+                self.player_proc.stdin.flush()
+            except Exception:
+                pass
+
+        self.prebuf = []
+        self.prebuf_ready = False
+        self.active_source = None
+        self.set_status("STANDBY", "biasa", "")
+        self._restore_broadcast_volume()
+
+        # Pastikan player standby tetap pre-warmed untuk siaran Server PA HD (s16le, 44100)
+        if not (self.player_proc and self.player_proc.poll() is None and self.player_codec == "s16le" and getattr(self, "player_sample_rate", 44100) == 44100):
+            self._start_player("s16le", 44100)
+
     def _start_player(self, codec="s16le", sample_rate=44100):
         """Menjalankan ffplay dengan konfigurasi ultra-low latency via pipe stdin."""
         if self.player_proc is not None and self.player_proc.poll() is None:
@@ -852,10 +885,19 @@ class AudioReceiver:
                     if masked and mask_key:
                         payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
 
+                    # Opcode 0x1: Pesan Teks (Kontrol / stream_end)
+                    if opcode == 0x1:
+                        try:
+                            text_msg = payload.decode("utf-8", errors="ignore")
+                            if "stream_end" in text_msg:
+                                self._on_stream_end()
+                        except Exception:
+                            pass
+
                     # Opcode 0x2: Biner Audio Frame
-                    if opcode == 0x2:
+                    elif opcode == 0x2:
                         now_audio = time.time()
-                        if self.active_source == "RTP" and (now_audio - self.last_audio_time < 0.8):
+                        if self.active_source == "RTP" and (now_audio - self.last_audio_time < 2.5):
                             continue
 
                         if self.active_source != "WS":
@@ -897,11 +939,7 @@ class AudioReceiver:
 
             if self.is_running:
                 if self.active_source == "WS":
-                    self.active_source = None
-                    self.prebuf = []
-                    self.prebuf_ready = False
-                    self.set_status("STANDBY", "biasa", "")
-                    self._restore_broadcast_volume()
+                    self._on_stream_end()
                 time.sleep(1.5)
 
     # =========================================================================
@@ -1013,7 +1051,7 @@ class AudioReceiver:
             return
 
         # Jika siaran server PA via WebSocket/HTTP sedang aktif, IP Phone diabaikan agar tidak tumpang tindih
-        if self.active_source in ("WS", "HTTP") and (now - self.last_audio_time < 0.8):
+        if self.active_source in ("WS", "HTTP") and (now - self.last_audio_time < 2.5):
             return
 
         if self.active_source != "RTP":
@@ -1061,26 +1099,12 @@ class AudioReceiver:
     # 3. MONITOR LOOP (Deteksi Berhentinya Siaran & Idle Cleanup)
     # =========================================================================
     def _monitor_loop(self):
-        """Memantau selesainya siaran jika tidak ada paket/chunk audio selama > 0.8 detik."""
+        """Memantau selesainya siaran jika tidak ada paket/chunk audio selama > 2.5 detik (toleransi jitter WiFi)."""
         while self.is_running:
             time.sleep(0.1)
             if self.status == "STREAMING":
-                if time.time() - self.last_audio_time > 0.8:
-                    if self.player_proc and self.player_proc.stdin and self.prebuf:
-                        try:
-                            self.player_proc.stdin.write(b"".join(self.prebuf))
-                            self.player_proc.stdin.flush()
-                        except Exception:
-                            pass
-                    self.prebuf = []
-                    self.prebuf_ready = False
-                    self.active_source = None
-                    self.set_status("STANDBY", "biasa", "")
-                    self._restore_broadcast_volume()
-
-                    # Pastikan player standby tetap pre-warmed untuk siaran Server PA HD (s16le, 44100)
-                    if not (self.player_proc and self.player_proc.poll() is None and self.player_codec == "s16le" and getattr(self, "player_sample_rate", 44100) == 44100):
-                        self._start_player("s16le", 44100)
+                if time.time() - self.last_audio_time > 2.5:
+                    self._on_stream_end()
 
     # =========================================================================
     # LIFECYCLE MANAGEMENT (Start, Stop, Test Audio)
@@ -1108,7 +1132,7 @@ class AudioReceiver:
 
     def stop(self):
         self.is_running = False
-        self._restore_broadcast_volume()
+        self._on_stream_end()
         self._close_player()
 
         if self.stream_sock:

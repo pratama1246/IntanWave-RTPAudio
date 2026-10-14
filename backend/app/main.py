@@ -496,13 +496,18 @@ async def stream_live(request: Request, node_id: str = ""):
                     if await request.is_disconnected():
                         break
                     continue
+                if chunk == b"STREAM_END":
+                    continue
                 chunks = [chunk]
                 while not q.empty() and len(chunks) < 10:
                     try:
-                        chunks.append(q.get_nowait())
+                        c = q.get_nowait()
+                        if c != b"STREAM_END":
+                            chunks.append(c)
                     except asyncio.QueueEmpty:
                         break
-                yield b"".join(chunks)
+                if chunks:
+                    yield b"".join(chunks)
         finally:
             stream_hub.unsubscribe(token)
 
@@ -535,13 +540,24 @@ async def ws_node_stream(websocket: WebSocket, node_id: str):
     async def send_audio():
         while True:
             chunk = await q.get()
+            if chunk == b"STREAM_END":
+                await websocket.send_text(json.dumps({"type": "stream_end"}))
+                continue
             chunks = [chunk]
+            has_end = False
             while not q.empty() and len(chunks) < 10:
                 try:
-                    chunks.append(q.get_nowait())
+                    c = q.get_nowait()
+                    if c == b"STREAM_END":
+                        has_end = True
+                        break
+                    chunks.append(c)
                 except asyncio.QueueEmpty:
                     break
-            await websocket.send_bytes(b"".join(chunks))
+            if chunks:
+                await websocket.send_bytes(b"".join(chunks))
+            if has_end:
+                await websocket.send_text(json.dumps({"type": "stream_end"}))
 
     async def recv_heartbeat():
         while True:

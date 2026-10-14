@@ -46,12 +46,14 @@ class StreamHub:
 
     def end(self):
         with self._lock:
+            if not self._active:
+                return
             self._active = False
             self._target_all = False
             self._target_nodes = set()
             subs = list(self._subs.values())
         for _, loop, q in subs:
-            self._call(loop, self._flush, q)
+            self._call(loop, self._end_sub, q)
 
     def publish(self, chunk: bytes):
         with self._lock:
@@ -80,6 +82,15 @@ class StreamHub:
             except asyncio.QueueEmpty:
                 pass
         q.put_nowait(chunk)
+
+    @staticmethod
+    def _end_sub(q: asyncio.Queue):
+        if q.full():
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        q.put_nowait(b"STREAM_END")
 
     @staticmethod
     def _flush(q: asyncio.Queue):
