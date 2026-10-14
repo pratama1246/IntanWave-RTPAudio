@@ -413,6 +413,25 @@ def upsert_node_heartbeat(
         cursor.execute("SELECT * FROM speakers WHERE node_id = ?", (node_id,))
         existing = cursor.fetchone()
 
+        # Deteksi jika ada 2 PC berbeda yang mengirim node_id yang sama (misal hasil cloning/copy folder)
+        if existing and existing["ip_address"] != ip_address and (hostname and existing["hostname"] != hostname or existing["ip_address"]):
+            is_cloned_node = False
+            if existing["last_online"]:
+                try:
+                    delta = (datetime.now() - datetime.fromisoformat(existing["last_online"])).total_seconds()
+                    if delta <= 90:
+                        is_cloned_node = True
+                except Exception:
+                    is_cloned_node = True
+            else:
+                is_cloned_node = True
+
+            if is_cloned_node:
+                # Pisahkan node_id untuk PC ini agar keduanya terdaftar terpisah sebagai speaker mandiri
+                node_id = f"{node_id}_{ip_address.replace('.', '_')}"
+                cursor.execute("SELECT * FROM speakers WHERE node_id = ?", (node_id,))
+                existing = cursor.fetchone()
+
         if existing:
             speaker_id = existing["id"]
             if force_update:

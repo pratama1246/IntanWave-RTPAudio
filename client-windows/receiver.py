@@ -55,6 +55,8 @@ def get_ffplay_bin():
     candidates = [
         EXE_DIR / "ffplay.exe",
         BUNDLE_DIR / "ffplay.exe",
+        EXE_DIR / "_internal" / "ffplay.exe",
+        BUNDLE_DIR / "_internal" / "ffplay.exe",
         EXE_DIR / "bin" / "ffplay.exe",
         BUNDLE_DIR / "bin" / "ffplay.exe",
     ]
@@ -125,8 +127,9 @@ class AudioReceiver:
         if not cfg.get("server_url"):
             cfg["server_url"] = "http://10.183.55.114:7080"
             changed = True
-        if not cfg.get("node_id"):
-            cfg["node_id"] = f"node_{uuid.uuid4().hex[:8]}"
+        if not cfg.get("node_id") or cfg.get("node_id") == "node_client_01":
+            clean_host = socket.gethostname().lower().replace(" ", "_").replace("-", "_")
+            cfg["node_id"] = f"node_{clean_host}_{uuid.uuid4().hex[:6]}"
             changed = True
         if not cfg.get("device_name"):
             cfg["device_name"] = f"Terminal Audio ({socket.gethostname()})"
@@ -371,7 +374,7 @@ class AudioReceiver:
             except Exception:
                 pass
             try:
-                self.player_proc.wait(timeout=0.3)
+                self.player_proc.wait(timeout=1.2)
             except Exception:
                 try:
                     self.player_proc.kill()
@@ -485,8 +488,8 @@ class AudioReceiver:
                                 "-flags", "low_delay",
                                 "-volume", str(vol),
                                 "-f", "alaw",
-                                "-ar", "8000",
-                                "-ac", "1",
+                                "-sample_rate", "8000",
+                                "-ch_layout", "mono",
                                 "-i", "-"
                             ]
                             self.player_proc = subprocess.Popen(
@@ -529,22 +532,42 @@ class AudioReceiver:
 
         # 2. Putar audio di background thread agar tidak ada blocking UI
         def _play_audio():
-            if sys.platform == "win32":
-                import winsound
-                candidates = [
-                    EXE_DIR / "test_chime.wav",
-                    BUNDLE_DIR / "test_chime.wav"
-                ]
-                for candidate in candidates:
-                    if candidate.exists():
+            candidates = [
+                EXE_DIR / "test_chime.wav",
+                BUNDLE_DIR / "test_chime.wav",
+                EXE_DIR / "_internal" / "test_chime.wav",
+                BUNDLE_DIR / "_internal" / "test_chime.wav",
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    sound_path = str(candidate.resolve())
+                    # 1. Coba via winsound
+                    if sys.platform == "win32":
                         try:
-                            winsound.PlaySound(str(candidate.resolve()), winsound.SND_FILENAME)
+                            import winsound
+                            winsound.PlaySound(sound_path, winsound.SND_FILENAME | winsound.SND_NODEFAULT)
                             return
                         except Exception as e:
                             print("Winsound error:", e)
 
-                # Fallback jika file wav tidak ada
+                    # 2. Fallback via ffplay langsung
+                    try:
+                        ffplay_bin = get_ffplay_bin()
+                        vol = int(self.config.get("volume", 100))
+                        vol = max(0, min(100, vol))
+                        subprocess.run(
+                            [ffplay_bin, "-nodisp", "-autoexit", "-loglevel", "quiet", "-volume", str(vol), sound_path],
+                            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+                            timeout=5
+                        )
+                        return
+                    except Exception as e:
+                        print("FFplay chime error:", e)
+
+            # Fallback terakhir jika file wav tidak ada
+            if sys.platform == "win32":
                 try:
+                    import winsound
                     winsound.MessageBeep(winsound.MB_ICONASTERISK)
                 except Exception:
                     pass
