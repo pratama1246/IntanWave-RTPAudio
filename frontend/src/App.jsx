@@ -526,10 +526,17 @@ function MultiTargetSelector({
                             className="rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
                           />
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                          <span className="truncate">{spk.name}</span>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="truncate">{spk.name}</span>
+                            {spk.hostname && (
+                              <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                                ({spk.hostname})
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {spk.device_type === 'pc_node' && (
+                          {spk.device_type === 'node' && (
                             <span className="text-[9px] px-1 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">
                               PC
                             </span>
@@ -601,8 +608,8 @@ export default function App() {
 
   // Broadcast Target Selection State
   const [targetMode, setTargetMode] = useState('all'); // 'all', 'group', 'speaker'
-  const [selectedGroup, setSelectedGroup] = useState('Kantor');
-  const [selectedGroups, setSelectedGroups] = useState(['Kantor']);
+  const [selectedGroup, setSelectedGroup] = useState('');
+  const [selectedGroups, setSelectedGroups] = useState([]);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState(null);
   const [selectedSpeakerIds, setSelectedSpeakerIds] = useState([]);
 

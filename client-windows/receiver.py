@@ -201,11 +201,13 @@ class AudioReceiver:
         if not cfg.get("server_url"):
             cfg["server_url"] = "http://10.183.55.114:7080"
             changed = True
-        if not cfg.get("node_id") or cfg.get("node_id") == "node_client_01":
-            clean_host = socket.gethostname().lower().replace(" ", "_").replace("-", "_")
+        clean_host = socket.gethostname().lower().replace(" ", "_").replace("-", "_")
+        curr_node_id = cfg.get("node_id", "")
+        # Jika node_id kosong, default lama, atau hostname berubah karena folder di-copy ke PC lain
+        if not curr_node_id or curr_node_id == "node_client_01" or not curr_node_id.startswith(f"node_{clean_host}_"):
             cfg["node_id"] = f"node_{clean_host}_{uuid.uuid4().hex[:6]}"
             changed = True
-        if not cfg.get("device_name"):
+        if not cfg.get("device_name") or cfg.get("device_name") == "Terminal Audio Node (Amplifier)":
             cfg["device_name"] = f"Terminal Audio ({socket.gethostname()})"
             changed = True
         if not cfg.get("groups") and not cfg.get("zone"):

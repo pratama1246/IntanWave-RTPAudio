@@ -387,7 +387,17 @@ def upsert_node_heartbeat(
     primary_group = grp_list[0]
     grp_json = json.dumps(grp_list)
 
-    device_name = (device_name or f"PC Audio ({hostname or node_id})").strip()
+    # Format device name agar tidak kembar: sertakan hostname jika device_name default/generic
+    is_generic_name = not device_name or device_name.strip() in (
+        "Terminal Audio Node (Amplifier)",
+        "Terminal Audio Node",
+        "Terminal Audio",
+        "PC Audio"
+    )
+    if is_generic_name and hostname:
+        device_name = f"Terminal Audio ({hostname})"
+    else:
+        device_name = (device_name or f"Terminal Audio ({hostname or node_id})").strip()
     now = datetime.now().isoformat()
 
     with get_db() as conn:
@@ -460,18 +470,41 @@ def upsert_node_heartbeat(
                     WHERE id = ?
                 """, (device_name, ip_address, port, primary_group, grp_json, hostname, now, now, speaker_id))
             else:
-                cursor.execute("""
-                    UPDATE speakers
-                    SET ip_address = ?,
-                        port = ?,
-                        hostname = ?,
-                        status = 'online',
-                        latency_ms = 1,
-                        last_online = ?,
-                        last_checked = ?,
-                        device_type = 'node'
-                    WHERE id = ?
-                """, (ip_address, port, hostname, now, now, speaker_id))
+                curr_name = existing["name"] or ""
+                should_update_name = (not curr_name or curr_name in (
+                    "Terminal Audio Node (Amplifier)",
+                    "Terminal Audio Node",
+                    "Terminal Audio",
+                    "PC Audio"
+                )) and hostname
+
+                if should_update_name:
+                    cursor.execute("""
+                        UPDATE speakers
+                        SET name = ?,
+                            ip_address = ?,
+                            port = ?,
+                            hostname = ?,
+                            status = 'online',
+                            latency_ms = 1,
+                            last_online = ?,
+                            last_checked = ?,
+                            device_type = 'node'
+                        WHERE id = ?
+                    """, (f"Terminal Audio ({hostname})", ip_address, port, hostname, now, now, speaker_id))
+                else:
+                    cursor.execute("""
+                        UPDATE speakers
+                        SET ip_address = ?,
+                            port = ?,
+                            hostname = ?,
+                            status = 'online',
+                            latency_ms = 1,
+                            last_online = ?,
+                            last_checked = ?,
+                            device_type = 'node'
+                        WHERE id = ?
+                    """, (ip_address, port, hostname, now, now, speaker_id))
         else:
             cursor.execute("""
                 INSERT INTO speakers (
