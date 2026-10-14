@@ -513,8 +513,8 @@ async def stream_live(request: Request, node_id: str = ""):
 
     return StreamingResponse(
         gen(),
-        media_type="application/octet-stream",
-        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Audio-Format": "s16le;rate=44100;ch=1"},
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Audio-Format": "mp3;rate=44100;ch=1;bitrate=128k"},
     )
 
 @app.websocket("/ws/node/{node_id}")

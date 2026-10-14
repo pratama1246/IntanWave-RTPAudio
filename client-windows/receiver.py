@@ -590,10 +590,8 @@ class AudioReceiver:
         """
         Menangani akhir siaran audio secara mulus:
         1. Flush sisa prebuffer jika ada ke player stdin.
-        2. Tulis silence padding ~40ms ke stdin player untuk membersihkan buffer ring WASAPI/SDL
-           tanpa memicu glitch atau memutar ulang artefak suara akhir.
-        3. Kembalikan status ke STANDBY dan pulihkan volume master Windows ke level semula.
-        4. Pastikan audio player tetap pre-warmed dalam mode s16le 44100Hz untuk siaran berikutnya.
+        2. Kembalikan status ke STANDBY dan pulihkan volume master Windows ke level semula.
+        3. Pastikan audio player tetap pre-warmed dalam mode MP3 44.1kHz untuk siaran berikutnya.
         """
         if self.status != "STREAMING" and self.active_source is None:
             return
@@ -602,10 +600,13 @@ class AudioReceiver:
             try:
                 if self.prebuf:
                     self.player_proc.stdin.write(b"".join(self.prebuf))
-                silence_len = 3528 if self.player_codec == "s16le" else 320
-                silence_val = b"\x00" if self.player_codec != "alaw" else b"\xd5"
-                self.player_proc.stdin.write(silence_val * silence_len)
-                self.player_proc.stdin.flush()
+                    self.player_proc.stdin.flush()
+                # Jika codec PCM/G.711 (misal setelah panggilan IP Phone RTP), tulis padding silence
+                if self.player_codec in ("s16le", "alaw", "mulaw"):
+                    silence_len = 3528 if self.player_codec == "s16le" else 320
+                    silence_val = b"\x00" if self.player_codec != "alaw" else b"\xd5"
+                    self.player_proc.stdin.write(silence_val * silence_len)
+                    self.player_proc.stdin.flush()
             except Exception:
                 pass
 
@@ -615,43 +616,50 @@ class AudioReceiver:
         self.set_status("STANDBY", "biasa", "")
         self._restore_broadcast_volume()
 
-        # Pastikan player standby tetap pre-warmed untuk siaran Server PA HD (s16le, 44100)
-        if not (self.player_proc and self.player_proc.poll() is None and self.player_codec == "s16le" and getattr(self, "player_sample_rate", 44100) == 44100):
-            self._start_player("s16le", 44100)
+        # Restart player standby agar fresh & pre-warmed dalam mode MP3 44.1kHz
+        self._close_player()
+        self._start_player("mp3", 44100)
 
-    def _start_player(self, codec="s16le", sample_rate=44100):
+    def _start_player(self, codec="mp3", sample_rate=44100):
         """Menjalankan ffplay dengan konfigurasi ultra-low latency via pipe stdin."""
         if self.player_proc is not None and self.player_proc.poll() is None:
             if self.player_codec == codec and getattr(self, "player_sample_rate", None) == sample_rate:
                 return
             self._close_player()
 
-        vol = max(0, min(100, int(self.config.get("volume", 100))))
-        if codec == "s16le":
+        if codec == "mp3":
+            codec_fmt = "mp3"
+            probesize_val = "2048"
+        elif codec == "s16le":
             codec_fmt = "s16le"
-            sr_str = str(sample_rate or 44100)
+            probesize_val = "32"
         elif codec == "mulaw":
             codec_fmt = "mulaw"
-            sr_str = "8000"
+            probesize_val = "32"
         else:
             codec_fmt = "alaw"
-            sr_str = "8000"
+            probesize_val = "32"
 
         cmd = [
             get_ffplay_bin(),
             "-nodisp",
             "-autoexit",
             "-loglevel", "quiet",
-            "-probesize", "32",
+            "-probesize", probesize_val,
             "-analyzeduration", "0",
             "-fflags", "nobuffer",
             "-flags", "low_delay",
             "-volume", "100",
             "-f", codec_fmt,
-            "-sample_rate", sr_str,
-            "-ch_layout", "mono",
-            "-i", "-"
         ]
+        if codec != "mp3":
+            sr_str = str(sample_rate or (44100 if codec == "s16le" else 8000))
+            cmd.extend([
+                "-sample_rate", sr_str,
+                "-ch_layout", "mono",
+            ])
+        cmd.extend(["-i", "-"])
+
         try:
             self.player_proc = subprocess.Popen(
                 cmd,
@@ -669,9 +677,9 @@ class AudioReceiver:
             self.player_proc = None
 
     def _feed_player(self, data: bytes):
-        """Menulis chunk audio mentah ke ffplay dengan prebuffer kecil (~40ms) untuk responsivitas instan."""
+        """Menulis chunk audio mentah ke ffplay dengan prebuffer (~150ms) untuk responsivitas instan."""
         if not (self.player_proc and self.player_proc.stdin and self.player_proc.poll() is None):
-            self._start_player(self.player_codec or "s16le", getattr(self, "player_sample_rate", 44100) or 44100)
+            self._start_player(self.player_codec or "mp3", getattr(self, "player_sample_rate", 44100) or 44100)
         if not (self.player_proc and self.player_proc.stdin):
             return
         try:
@@ -687,7 +695,7 @@ class AudioReceiver:
                 self.player_proc.stdin.flush()
         except Exception:
             self._close_player()
-            self._start_player(self.player_codec or "s16le", getattr(self, "player_sample_rate", 44100) or 44100)
+            self._start_player(self.player_codec or "mp3", getattr(self, "player_sample_rate", 44100) or 44100)
 
     def _close_player(self):
         """Menutup proses ffplay dan melepaskan sound card saat aplikasi ditutup atau codec berganti."""
@@ -906,7 +914,7 @@ class AudioReceiver:
                             self.set_status("STREAMING", "biasa", "Siaran Server PA (HD)")
                             self.notify_toast("IntanWave — Siaran Server (HD)", f"Menerima siaran audio HD dari {self.server_url}")
                             threading.Thread(target=self._fetch_playback_info, daemon=True).start()
-                            self._start_player("s16le", 44100)
+                            self._start_player("mp3", 44100)
 
                         self.last_audio_time = now_audio
                         self._feed_player(payload)
@@ -1116,7 +1124,7 @@ class AudioReceiver:
 
         # Pre-warm / Hot-Standby Audio Player
         # Membuka ffplay ke Windows Audio Engine (WASAPI) sejak awal agar tidak ada delay cold-start (0% CPU saat idle)
-        self._start_player("s16le", 44100)
+        self._start_player("mp3", 44100)
 
         self.stream_thread = threading.Thread(target=self._ws_stream_loop, daemon=True)
         self.stream_thread.start()

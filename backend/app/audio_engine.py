@@ -183,14 +183,18 @@ class AudioEngine:
                 ])
 
         if use_http:
-            # Dual-Stream HD: 44.1kHz 16-bit PCM mono (882 sample / 1764 byte per 20ms)
-            # Jernih selevel CD untuk PC client, zero-buffer, zero-latency
+            # Dual-Stream HD MP3: 44.1kHz 128kbps CBR mono (hemat bandwidth 82% untuk PC Node di WiFi)
+            # Menghasilkan stream MP3 murni frame-by-frame, ultra-stabil di jaringan nirkabel
             net_cmd_args.extend([
                 "-map", "0:a",
-                "-af", "aresample=44100:async=1,asetnsamples=n=882",
-                "-c:a", "pcm_s16le",
+                "-af", "aresample=44100:async=1",
+                "-c:a", "libmp3lame",
+                "-b:a", "128k",
                 "-ac", "1",
-                "-f", "s16le",
+                "-ar", "44100",
+                "-f", "mp3",
+                "-write_xing", "0",
+                "-id3v2_version", "0",
                 "-flush_packets", "1",
                 "pipe:1"
             ])
@@ -263,10 +267,15 @@ class AudioEngine:
             cmd = [
                 "ffmpeg", "-re", "-y",
                 "-i", str(chime_path.resolve()),
-                "-af", "aresample=44100:async=1,asetnsamples=n=882",
-                "-c:a", "pcm_s16le",
+                "-af", "aresample=44100:async=1",
+                "-c:a", "libmp3lame",
+                "-b:a", "128k",
                 "-ac", "1",
-                "-f", "s16le", "-flush_packets", "1",
+                "-ar", "44100",
+                "-f", "mp3",
+                "-write_xing", "0",
+                "-id3v2_version", "0",
+                "-flush_packets", "1",
                 "pipe:1"
             ]
             try:
@@ -281,7 +290,7 @@ class AudioEngine:
                 def _pump():
                     try:
                         while True:
-                            chunk = proc.stdout.read(1764)
+                            chunk = proc.stdout.read(4096)
                             if not chunk:
                                 break
                             stream_hub.publish(chunk)
@@ -383,10 +392,10 @@ class AudioEngine:
 
     @staticmethod
     def _pump_stream(proc):
-        """Baca PCM 16-bit 44.1kHz dari stdout FFmpeg (1764 byte per ~20ms) lalu bagikan ke semua client HTTP/WS."""
+        """Baca MP3 128kbps dari stdout FFmpeg (~418 byte per frame ~26ms) lalu bagikan ke semua client HTTP/WS."""
         try:
             while True:
-                chunk = proc.stdout.read(1764)
+                chunk = proc.stdout.read(4096)
                 if not chunk:
                     break
                 stream_hub.publish(chunk)
