@@ -2306,32 +2306,57 @@ export default function App() {
                             </td>
 
                             {/* Digital Clock / Multi-Times */}
-                            <td className="py-3 px-4">
-                              <div className="flex flex-wrap items-center gap-1.5 max-w-[220px]">
-                                {parseScheduleTimes(s.time_str).map((t, idx, arr) => (
-                                  arr.length === 1 ? (
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              {(() => {
+                                const allTimes = parseScheduleTimes(s.time_str);
+                                if (allTimes.length === 1) {
+                                  return (
                                     <span 
-                                      key={idx}
                                       className={`text-xl font-semibold tracking-tight ${
                                         s.enabled ? 'text-slate-900' : 'text-slate-400'
                                       }`}
                                     >
-                                      {t}
+                                      {allTimes[0]}
                                     </span>
-                                  ) : (
-                                    <span 
-                                      key={idx}
-                                      className={`px-2 py-0.5 rounded-md text-xs font-semibold tracking-normal border ${
-                                        s.enabled 
-                                          ? 'bg-blue-50/90 text-blue-700 border-blue-200/70 shadow-2xs' 
-                                          : 'bg-slate-100 text-slate-400 border-slate-200/50'
-                                      }`}
-                                    >
-                                      {t}
-                                    </span>
-                                  )
-                                ))}
-                              </div>
+                                  );
+                                }
+
+                                const maxVisible = 2;
+                                const visibleTimes = allTimes.slice(0, maxVisible);
+                                const hasMore = allTimes.length > maxVisible;
+
+                                return (
+                                  <div 
+                                    className="inline-flex items-center gap-1.5 whitespace-nowrap min-w-0" 
+                                    title={`Semua jam siar: ${allTimes.join(', ')}`}
+                                  >
+                                    {visibleTimes.map((t, idx) => (
+                                      <span 
+                                        key={idx}
+                                        className={`px-2 py-0.5 rounded-md text-xs font-semibold tracking-normal border ${
+                                          s.enabled 
+                                            ? 'bg-slate-100 text-slate-900 border-slate-200/80 shadow-2xs' 
+                                            : 'bg-slate-100 text-slate-400 border-slate-200/50'
+                                        }`}
+                                      >
+                                        {t}
+                                      </span>
+                                    ))}
+                                    {hasMore && (
+                                      <span 
+                                        className={`px-1.5 py-0.5 rounded-md text-xs font-semibold tracking-normal border cursor-default select-none ${
+                                          s.enabled 
+                                            ? 'bg-slate-100 text-slate-900 border-slate-200/80 shadow-2xs' 
+                                            : 'bg-slate-100 text-slate-400 border-slate-200/50'
+                                        }`}
+                                        title={`Semua jam siar: ${allTimes.join(', ')}`}
+                                      >
+                                        ...
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
 
                             {/* Nama Jadwal & Audio & Target */}
