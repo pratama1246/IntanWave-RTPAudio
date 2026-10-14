@@ -379,12 +379,12 @@ function MultiTargetSelector({
                     : isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                Semua Speaker (Global)
+                Semua Speaker Global
               </button>
             </div>
             
             <p className="text-[11px] text-slate-400">
-              Pilih group dan/atau speaker spesifik untuk siaran gabungan (contoh: 1 Group + 1 Speaker).
+              Pilih group atau speaker spesifik untuk siaran gabungan, contoh: 1 Group dan 1 Speaker.
             </p>
           </div>
 
@@ -394,7 +394,7 @@ function MultiTargetSelector({
               <div className="flex items-center justify-between text-[11px]">
                 <span className={`font-semibold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                   <Users className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Group / Area ({selectedGroups.length} dipilih)</span>
+                  <span>Group Area • {selectedGroups.length} dipilih</span>
                 </span>
                 <div className="flex items-center gap-2">
                   <button
@@ -465,7 +465,7 @@ function MultiTargetSelector({
               <div className="flex items-center justify-between text-[11px]">
                 <span className={`font-semibold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                   <Volume2 className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Speaker Spesifik ({selectedSpeakerIds.length} dipilih)</span>
+                  <span>Speaker Spesifik • {selectedSpeakerIds.length} dipilih</span>
                 </span>
                 <div className="flex items-center gap-2">
                   <button
@@ -539,7 +539,7 @@ function MultiTargetSelector({
                             <span className="truncate">{spk.name}</span>
                             {spk.hostname && (
                               <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                                ({spk.hostname})
+                                • {spk.hostname}
                               </span>
                             )}
                           </div>
@@ -600,7 +600,7 @@ export default function App() {
     enable_multicast: true,
     enable_local: true,
     multicast_dest: '239.255.0.1:5004',
-    target_desc: 'Semua Speaker (Multicast)'
+    target_desc: 'Semua Speaker Global'
   });
 
   const [audioList, setAudioList] = useState([]);
@@ -1627,8 +1627,9 @@ export default function App() {
       setUploadSelectedFile(preselectedFile);
       const cleanName = preselectedFile.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
       setUploadDisplayName(cleanName);
-      const isEmerg = /siren|sirine|ews|darurat|emergency|bahaya|evakuasi/i.test(preselectedFile.name);
-      setUploadCategory(isEmerg ? 'darurat' : 'biasa');
+      const isEmerg = /siren|sirine|ews|darurat|emergency|bahaya|evakuasi|kebakaran|gempa|tsunami/i.test(preselectedFile.name);
+      const isSafety = /safety|k3|briefing|apd|keselamatan/i.test(preselectedFile.name);
+      setUploadCategory(isEmerg ? 'darurat' : isSafety ? 'safety' : 'biasa');
     } else {
       setUploadSelectedFile(null);
       setUploadDisplayName('');
@@ -1645,8 +1646,11 @@ export default function App() {
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
       setUploadDisplayName(cleanName);
     }
-    const isEmerg = /siren|sirine|ews|darurat|emergency|bahaya|evakuasi/i.test(file.name);
+    const isEmerg = /siren|sirine|ews|darurat|emergency|bahaya|evakuasi|kebakaran|gempa|tsunami/i.test(file.name);
+    const isSafety = /safety|k3|briefing|apd|keselamatan/i.test(file.name);
     if (isEmerg) setUploadCategory('darurat');
+    else if (isSafety) setUploadCategory('safety');
+    else setUploadCategory('biasa');
     setShowUploadModal(true);
     if (e.target) e.target.value = '';
   };
@@ -1688,7 +1692,7 @@ export default function App() {
 
   const handleRequestChangeCategory = (audio, explicitTarget = null) => {
     const currentCat = audio.category || 'biasa';
-    const targetCategory = explicitTarget || (currentCat === 'darurat' ? 'biasa' : 'darurat');
+    const targetCategory = explicitTarget || currentCat;
     setCategoryChangeTarget({ audio, targetCategory });
     setEditingDisplayName(audio.display_name || '');
   };
@@ -2056,11 +2060,11 @@ export default function App() {
                     : 'bg-emerald-500'
               }`} />
               {hasEmergency 
-                ? (hasMultipleSessions ? `Darurat (${activeSessions.length} Zona)` : 'Darurat')
+                ? (hasMultipleSessions ? `Darurat • ${activeSessions.length} Zona` : 'Darurat')
                 : hasSafety
-                  ? (hasMultipleSessions ? `K3 (${activeSessions.length} Zona)` : 'K3 / Safety')
+                  ? (hasMultipleSessions ? `K3 • ${activeSessions.length} Zona` : 'K3')
                   : isPlaying 
-                    ? (hasMultipleSessions ? `Berbunyi (${activeSessions.length} Zona)` : 'Berbunyi')
+                    ? (hasMultipleSessions ? `Berbunyi • ${activeSessions.length} Zona` : 'Berbunyi')
                     : 'Siaga'}
             </span>
 
@@ -2247,7 +2251,7 @@ export default function App() {
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
                 <span>{serverDateDisplay}</span>
                 <span className="text-slate-300">•</span>
-                <span>Waktu Indonesia Barat (UTC+7)</span>
+                <span>Waktu Indonesia Barat • UTC+7</span>
               </div>
             </div>
 
@@ -2352,7 +2356,7 @@ export default function App() {
                 <span className="font-semibold text-slate-700 shrink-0">Siaran berikutnya:</span>
                 {nextSchedule ? (
                   <span className="truncate text-slate-900 font-semibold">
-                    {nextSchedule.time_str} • {nextSchedule.name} ({nextSchedule.dayLabel})
+                    {nextSchedule.time_str} • {nextSchedule.name} • {nextSchedule.dayLabel}
                   </span>
                 ) : (
                   <span className="text-slate-400">Tidak ada jadwal aktif</span>
@@ -2585,7 +2589,7 @@ export default function App() {
           <div className="space-y-3">
             {/* Filter Pills Bar */}
             <div className="p-2.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs flex flex-wrap items-center justify-between gap-2.5 text-xs">
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-slate-400 font-medium mr-1 text-[11px]">Kategori:</span>
                 <button
                   type="button"
@@ -2596,7 +2600,7 @@ export default function App() {
                       : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                   }`}
                 >
-                  Semua ({audioList.length})
+                  Semua • {audioList.length}
                 </button>
                 <button
                   type="button"
@@ -2608,7 +2612,19 @@ export default function App() {
                   }`}
                 >
                   <Volume2 className="w-3 h-3" />
-                  <span>Suara Biasa ({audioList.filter(a => (a.category || 'biasa') === 'biasa').length})</span>
+                  <span>Rutin • {audioList.filter(a => (a.category || 'biasa') === 'biasa').length}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAudioCategoryFilter('safety')}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    audioCategoryFilter === 'safety'
+                      ? 'bg-amber-600 text-white shadow-2xs'
+                      : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80'
+                  }`}
+                >
+                  <HardHat className="w-3 h-3 text-amber-600" />
+                  <span>K3 & Safety • {audioList.filter(a => a.category === 'safety').length}</span>
                 </button>
                 <button
                   type="button"
@@ -2620,12 +2636,12 @@ export default function App() {
                   }`}
                 >
                   <Siren className="w-3 h-3 text-rose-500 animate-pulse" />
-                  <span>Suara Darurat ({emergencyAudios.length})</span>
+                  <span>Darurat • {emergencyAudios.length}</span>
                 </button>
               </div>
 
               <div className="text-[11px] text-slate-400">
-                Gunakan tombol pensil di kolom aksi jika ingin mengubah kondisi atau nama audio.
+                Pilih ikon pensil di kolom aksi untuk mengubah prioritas atau nama audio.
               </div>
             </div>
 
@@ -2663,41 +2679,48 @@ export default function App() {
                       {filteredAudioList.map((a) => {
                         const isPreviewThis = previewingId === `lib_${a.id}` && isPreviewPlaying;
                         const isDarurat = (a.category || 'biasa') === 'darurat';
+                        const isSafety = (a.category || '').toLowerCase() === 'safety';
                         return (
                           <tr 
                             key={a.id} 
                             className={`transition-colors ${
-                              isDarurat ? 'bg-rose-50/25 hover:bg-rose-50/50' : 'hover:bg-slate-50/80'
+                              isDarurat ? 'bg-rose-50/25 hover:bg-rose-50/50' : isSafety ? 'bg-amber-50/25 hover:bg-amber-50/50' : 'hover:bg-slate-50/80'
                             }`}
                           >
                             <td className="py-3 px-4 whitespace-nowrap">
                               <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-semibold ${
-                                isDarurat ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-700'
+                                isDarurat ? 'bg-rose-100 text-rose-700' : isSafety ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
                               }`}>
                                 {a.format}
                               </span>
                             </td>
 
-                            {/* Kondisi / Tipe (Label Visual Statis) */}
+                            {/* Prioritas / Kategori */}
                             <td className="py-3 px-4 whitespace-nowrap">
                               {isDarurat ? (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-100/80 text-rose-700 border border-rose-200 shadow-2xs">
                                   <Siren className="w-3.5 h-3.5 text-rose-600 animate-pulse" />
                                   <span>Darurat</span>
                                 </span>
+                              ) : isSafety ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-100/80 text-amber-800 border border-amber-200 shadow-2xs">
+                                  <HardHat className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>K3 & Safety</span>
+                                </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
                                   <Volume2 className="w-3.5 h-3.5 text-slate-400" />
-                                  <span>Biasa</span>
+                                  <span>Rutin</span>
                                 </span>
                               )}
                             </td>
 
                             <td className="py-3 px-4 min-w-0">
                               <div className={`font-semibold truncate flex items-center gap-1.5 ${
-                                isDarurat ? 'text-rose-950 font-bold' : 'text-slate-900'
+                                isDarurat ? 'text-rose-950 font-bold' : isSafety ? 'text-amber-950 font-semibold' : 'text-slate-900'
                               }`}>
                                 {isDarurat && <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />}
+                                {isSafety && <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />}
                                 <span className="truncate">{a.display_name}</span>
                               </div>
                               <div className="text-[10px] text-slate-400 truncate mt-0.5">{a.filename}</div>
@@ -2724,24 +2747,26 @@ export default function App() {
                                   <Headphones className="w-3.5 h-3.5" />
                                 </button>
 
-                                {/* Putar ke Speaker Luar (Buka Konfirmasi) */}
+                                {/* Putar ke Speaker Luar */}
                                 <button 
                                   onClick={() => setPlayConfirmAudio(a)}
                                   className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
                                     isDarurat 
                                       ? 'text-rose-600 hover:bg-rose-100/70 hover:text-rose-700' 
-                                      : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
+                                      : isSafety
+                                        ? 'text-amber-600 hover:bg-amber-100/70 hover:text-amber-700'
+                                        : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
                                   }`}
-                                  title="Siarkan ke speaker fisik luar (buka konfirmasi)"
+                                  title="Siarkan ke speaker luar"
                                 >
                                   <Play className="w-3.5 h-3.5 fill-current" />
                                 </button>
 
-                                {/* Ubah Kondisi / Edit */}
+                                {/* Ubah Prioritas / Edit */}
                                 <button 
                                   onClick={() => handleRequestChangeCategory(a, a.category || 'biasa')}
                                   className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                                  title="Ubah kondisi atau nama audio"
+                                  title="Ubah prioritas atau nama audio"
                                 >
                                   <Edit2 className="w-3.5 h-3.5" />
                                 </button>
@@ -2926,13 +2951,13 @@ export default function App() {
                               <span className={`w-1.5 h-1.5 rounded-full ${
                                 isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
                               }`} />
-                              <span>{isOnline ? (s.device_type === 'node' ? 'Online (DHCP)' : `${s.latency_ms || 1}ms`) : 'Offline'}</span>
+                              <span>{isOnline ? (s.device_type === 'node' ? 'Online DHCP' : `${s.latency_ms || 1}ms`) : 'Offline'}</span>
                             </span>
                           </td>
                           <td className="py-2 px-3 font-semibold text-slate-900 whitespace-nowrap">
                             <div className="flex items-center gap-2">
                               {s.device_type === 'node' ? (
-                                <span className="p-1 rounded bg-indigo-50 text-indigo-600 shrink-0" title="PC Audio Node (Windows DHCP)">
+                                <span className="p-1 rounded bg-indigo-50 text-indigo-600 shrink-0" title="PC Audio Node Windows">
                                   <Laptop className="w-3.5 h-3.5" />
                                 </span>
                               ) : (
@@ -3098,12 +3123,12 @@ export default function App() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-medium text-slate-700">Group Audio</label>
-                  <span className="text-[11px] text-slate-400">Pilih 1 atau lebih group (klik badge)</span>
+                  <span className="text-[11px] text-slate-400">Pilih satu atau beberapa group</span>
                 </div>
                 <input 
                   type="text" 
                   required
-                  placeholder="Ketik nama group (pisahkan koma jika > 1, misal: Kantor, Satpam)"
+                  placeholder="Ketik nama group, pisahkan koma untuk beberapa group: Kantor, Satpam"
                   value={speakerForm.groupsText || ''}
                   onChange={e => setSpeakerForm({ ...speakerForm, groupsText: e.target.value })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
@@ -3170,7 +3195,7 @@ export default function App() {
                   Konfirmasi Siaran Sirine Darurat
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Sirine peringatan darurat (EWS) akan langsung dibunyikan ke speaker fisik luar. Pastikan kondisi darurat atau telah dikoordinasikan.
+                  Sirine peringatan darurat akan langsung dibunyikan ke speaker fisik luar. Pastikan kondisi darurat atau telah dikoordinasikan.
                 </p>
               </div>
               <button 
@@ -3193,7 +3218,7 @@ export default function App() {
                   onChange={val => setSelectedEmergencyAudio(val)}
                   options={emergencyAudios.map(ea => ({
                     value: ea.filename,
-                    label: `${ea.display_name} (${ea.filename})`,
+                    label: `${ea.display_name} • ${ea.filename}`,
                     icon: <Siren className="w-3.5 h-3.5 text-rose-500" />
                   }))}
                   variant="light"
@@ -3276,7 +3301,7 @@ export default function App() {
               <div className="flex items-center justify-between gap-2">
                 <span className="text-slate-500 font-medium shrink-0">Berkas:</span>
                 <span className="text-slate-600 font-mono text-[11px] truncate">
-                  {playConfirmAudio.filename} ({formatSec(playConfirmAudio.duration)})
+                  {playConfirmAudio.filename} • {formatSec(playConfirmAudio.duration)}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
@@ -3354,8 +3379,8 @@ export default function App() {
                   onChange={val => setNewSchedule({ ...newSchedule, audio_file_id: parseInt(val) })}
                   options={audioList.map(a => ({
                     value: a.id,
-                    label: a.category === 'darurat' ? `[Darurat] ${a.display_name}` : a.display_name,
-                    sublabel: `${a.category === 'darurat' ? 'Suara Darurat (EWS)' : 'Suara Biasa'} • ${a.filename} • ${formatSec(a.duration)}`
+                    label: a.category === 'darurat' ? `[Darurat] ${a.display_name}` : a.category === 'safety' ? `[K3] ${a.display_name}` : a.display_name,
+                    sublabel: `${a.category === 'darurat' ? 'Darurat' : a.category === 'safety' ? 'K3 & Safety' : 'Rutin'} • ${a.filename} • ${formatSec(a.duration)}`
                   }))}
                   variant="light"
                   className="w-full"
@@ -3365,7 +3390,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Target Siaran (Bisa Centang 2 atau Lebih)</label>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Target Siaran</label>
                 <MultiTargetSelector
                   targetMode={newSchedule.target_mode || 'all'}
                   selectedGroups={newSchedule.target_group ? newSchedule.target_group.split(',').map(s => s.trim()).filter(Boolean) : []}
@@ -3394,7 +3419,7 @@ export default function App() {
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Waktu Siar (Bisa Banyak Jam)</span>
+                    <span>Waktu Siar</span>
                   </label>
                   <span className="text-[11px] font-medium text-slate-400">
                     {parseScheduleTimes(newSchedule.time_str).length} jam dipilih
@@ -3489,10 +3514,10 @@ export default function App() {
                     else setNewSchedule({ ...newSchedule, schedule_type: val });
                   }}
                   options={[
-                    { value: 'daily', label: 'Setiap hari (Sen - Min)' },
-                    { value: 'weekdays', label: 'Senin sampai Jumat' },
+                    { value: 'daily', label: 'Setiap hari • Senin sampai Minggu' },
+                    { value: 'weekdays', label: 'Hari kerja • Senin sampai Jumat' },
                     { value: 'custom', label: 'Pilih hari tertentu' },
-                    { value: 'once', label: 'Sekali jalan' }
+                    { value: 'once', label: 'Sekali siar' }
                   ]}
                   variant="light"
                   className="w-full"
@@ -3619,24 +3644,28 @@ export default function App() {
               <div className={`p-2.5 rounded-xl border shrink-0 ${
                 categoryChangeTarget.targetCategory === 'darurat'
                   ? 'bg-rose-50 border-rose-200 text-rose-600'
-                  : 'bg-blue-50 border-blue-200 text-blue-600'
+                  : categoryChangeTarget.targetCategory === 'safety'
+                    ? 'bg-amber-50 border-amber-200 text-amber-700'
+                    : 'bg-blue-50 border-blue-200 text-blue-600'
               }`}>
                 {categoryChangeTarget.targetCategory === 'darurat' ? (
                   <Siren className="w-6 h-6 animate-pulse" />
+                ) : categoryChangeTarget.targetCategory === 'safety' ? (
+                  <HardHat className="w-6 h-6" />
                 ) : (
                   <Volume2 className="w-6 h-6" />
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-base font-semibold text-slate-900 leading-snug">
-                  {categoryChangeTarget.targetCategory === 'darurat'
-                    ? 'Ubah ke Suara Darurat (EWS)?'
-                    : 'Ubah ke Suara Biasa?'}
+                  Ubah Prioritas Audio
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
                   {categoryChangeTarget.targetCategory === 'darurat'
-                    ? 'Suara ini akan ditandai merah dan dialokasikan untuk sirine bahaya atau evakuasi darurat.'
-                    : 'Suara ini akan dikembalikan menjadi suara operasional standar reguler.'}
+                    ? 'Prioritas 1: Sirine bahaya, alarm evakuasi, dan peringatan darurat.'
+                    : categoryChangeTarget.targetCategory === 'safety'
+                      ? 'Prioritas 2: Pengumuman K3, briefing keselamatan kerja, dan instruksi APD.'
+                      : 'Prioritas 3: Siaran operasional reguler dan pengumuman rutin harian.'}
                 </p>
               </div>
               <button 
@@ -3650,7 +3679,7 @@ export default function App() {
             {/* Content & Details */}
             <div className="mt-4 p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs space-y-3">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Nama Tampilan Audio:</label>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Nama Tampilan Audio</label>
                 <input
                   type="text"
                   value={editingDisplayName}
@@ -3661,45 +3690,61 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">Pilih Kondisi Suara:</label>
-                <div className="grid grid-cols-2 gap-2">
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">Pilih Kondisi atau Prioritas:</label>
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setCategoryChangeTarget(prev => ({ ...prev, targetCategory: 'biasa' }))}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
                       categoryChangeTarget.targetCategory === 'biasa'
-                        ? 'bg-blue-50/80 border-blue-500 text-blue-900 shadow-2xs font-semibold'
+                        ? 'bg-blue-50/90 border-blue-500 text-blue-900 shadow-2xs font-semibold'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     <div className="flex items-center gap-1.5 text-xs font-semibold">
-                      <Volume2 className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Suara Biasa</span>
+                      <Volume2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span>Rutin</span>
                     </div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">Operasional reguler</div>
+                    <div className="text-[10px] text-slate-400 mt-1">Prioritas 3</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCategoryChangeTarget(prev => ({ ...prev, targetCategory: 'safety' }))}
+                    className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                      categoryChangeTarget.targetCategory === 'safety'
+                        ? 'bg-amber-50/90 border-amber-500 text-amber-900 shadow-2xs font-semibold'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
+                      <HardHat className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>K3 Safety</span>
+                    </div>
+                    <div className="text-[10px] text-amber-600/70 mt-1">Prioritas 2</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setCategoryChangeTarget(prev => ({ ...prev, targetCategory: 'darurat' }))}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
                       categoryChangeTarget.targetCategory === 'darurat'
                         ? 'bg-rose-50 border-rose-500 text-rose-900 shadow-2xs font-semibold'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-600">
-                      <Siren className="w-3.5 h-3.5 animate-pulse" />
-                      <span>Suara Darurat</span>
+                      <Siren className="w-3.5 h-3.5 shrink-0" />
+                      <span>Darurat</span>
                     </div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">Sirine & alarm EWS</div>
+                    <div className="text-[10px] text-rose-500/70 mt-1">Prioritas 1</div>
                   </button>
                 </div>
               </div>
 
               <div className="pt-1 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
                 <span>Nama berkas fisik:</span>
-                <span className="font-medium text-slate-700">{categoryChangeTarget.audio.filename}</span>
+                <span className="font-medium text-slate-700 truncate max-w-[200px]">{categoryChangeTarget.audio.filename}</span>
               </div>
             </div>
 
@@ -3718,11 +3763,13 @@ export default function App() {
                 className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white shadow-xs transition-all cursor-pointer ${
                   categoryChangeTarget.targetCategory === 'darurat'
                     ? 'bg-rose-600 hover:bg-rose-700'
-                    : 'bg-blue-600 hover:bg-blue-700'
+                    : categoryChangeTarget.targetCategory === 'safety'
+                      ? 'bg-amber-600 hover:bg-amber-700'
+                      : 'bg-blue-600 hover:bg-blue-700'
                 }`}
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>Simpan & Ubah</span>
+                <span>Simpan Perubahan</span>
               </button>
             </div>
           </div>
@@ -3730,7 +3777,7 @@ export default function App() {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: UNGGAH BERKAS AUDIO (BIASA ATAU DARURAT)           */}
+      {/* MODAL: UNGGAH BERKAS AUDIO                                */}
       {/* ========================================================= */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
@@ -3743,7 +3790,7 @@ export default function App() {
                 </div>
                 <div>
                   <h3 className="text-base font-semibold text-slate-900">Unggah Berkas Audio</h3>
-                  <p className="text-xs text-slate-500">Pilih kondisi suara (Biasa atau Darurat) saat menyimpan</p>
+                  <p className="text-xs text-slate-500">Pilih berkas dan tentukan tingkat prioritas siaran</p>
                 </div>
               </div>
               <button 
@@ -3792,8 +3839,8 @@ export default function App() {
                     className="border-2 border-dashed border-slate-200 hover:border-blue-400 rounded-xl p-5 text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-blue-50/30"
                   >
                     <Upload className="w-7 h-7 text-slate-400 mx-auto mb-1.5" />
-                    <p className="text-xs font-semibold text-slate-700">Klik untuk memilih berkas suara</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Mendukung format MP3, WAV, OGG, FLAC</p>
+                    <p className="text-xs font-semibold text-slate-700">Pilih berkas suara dari komputer</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Format didukung: MP3, WAV, OGG, FLAC</p>
                   </div>
                 )}
               </div>
@@ -3806,7 +3853,7 @@ export default function App() {
                 <input 
                   type="text" 
                   required
-                  placeholder="Contoh: Apel Pagi, Sirine Darurat Gempa, Bel K3..."
+                  placeholder="Contoh: Apel Pagi, Pengingat APD, Sirine Gempa"
                   value={uploadDisplayName}
                   onChange={e => setUploadDisplayName(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
@@ -3817,55 +3864,66 @@ export default function App() {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-xs font-semibold text-slate-700">
-                    Kondisi / Tipe Suara:
+                    Kategori dan Tingkat Prioritas
                   </label>
-                  <span className="text-[11px] text-slate-400">Pilih salah satu kondisi</span>
+                  <span className="text-[11px] text-slate-400">Pilih salah satu tingkatan</span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2.5">
-                  {/* Opsi 1: Suara Biasa */}
+                <div className="grid grid-cols-3 gap-2">
+                  {/* Opsi 1: Rutin */}
                   <div
                     onClick={() => setUploadCategory('biasa')}
-                    className={`p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                    className={`p-2.5 rounded-xl border-2 cursor-pointer transition-all ${
                       uploadCategory === 'biasa'
-                        ? 'border-blue-500 bg-blue-50/50 shadow-2xs'
+                        ? 'border-blue-500 bg-blue-50/60 shadow-2xs'
                         : 'border-slate-200 bg-white hover:bg-slate-50'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1.5 font-semibold text-xs text-slate-900">
-                        <Volume2 className="w-4 h-4 text-blue-600" />
-                        <span>Suara Biasa</span>
-                      </div>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                        Biasa
-                      </span>
+                    <div className="flex items-center gap-1.5 font-semibold text-xs text-slate-900 mb-1">
+                      <Volume2 className="w-4 h-4 text-blue-600 shrink-0" />
+                      <span>Rutin</span>
                     </div>
-                    <p className="text-[11px] text-slate-500 leading-tight">
-                      Pengumuman umum, bel operasional, apel pagi, atau pengingat K3.
+                    <div className="text-[10px] font-semibold text-blue-600 mb-1">Prioritas 3</div>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Pengumuman umum, bel pergantian, apel pagi, informasi reguler.
                     </p>
                   </div>
 
-                  {/* Opsi 2: Suara Darurat (Merah) */}
+                  {/* Opsi 2: K3 & Safety */}
+                  <div
+                    onClick={() => setUploadCategory('safety')}
+                    className={`p-2.5 rounded-xl border-2 cursor-pointer transition-all ${
+                      uploadCategory === 'safety'
+                        ? 'border-amber-500 bg-amber-50/70 shadow-2xs'
+                        : 'border-slate-200 bg-white hover:bg-amber-50/20'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-semibold text-xs text-amber-900 mb-1">
+                      <HardHat className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>K3 & Safety</span>
+                    </div>
+                    <div className="text-[10px] font-semibold text-amber-600 mb-1">Prioritas 2</div>
+                    <p className="text-[10px] text-amber-700/80 leading-tight">
+                      Briefing K3, pengingat keselamatan, pemakaian APD lapangan.
+                    </p>
+                  </div>
+
+                  {/* Opsi 3: Darurat */}
                   <div
                     onClick={() => setUploadCategory('darurat')}
-                    className={`p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                    className={`p-2.5 rounded-xl border-2 cursor-pointer transition-all ${
                       uploadCategory === 'darurat'
                         ? 'border-rose-500 bg-rose-50/70 shadow-2xs'
                         : 'border-slate-200 bg-white hover:bg-rose-50/20'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1.5 font-semibold text-xs text-rose-700">
-                        <Siren className="w-4 h-4 text-rose-600 animate-pulse" />
-                        <span>Suara Darurat</span>
-                      </div>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white shadow-2xs">
-                        Merah EWS
-                      </span>
+                    <div className="flex items-center gap-1.5 font-semibold text-xs text-rose-700 mb-1">
+                      <Siren className="w-4 h-4 text-rose-600 shrink-0 animate-pulse" />
+                      <span>Darurat</span>
                     </div>
-                    <p className="text-[11px] text-rose-600/80 leading-tight">
-                      Sirine bahaya, alarm evakuasi, peringatan gempa/kebakaran, darurat.
+                    <div className="text-[10px] font-semibold text-rose-600 mb-1">Prioritas 1</div>
+                    <p className="text-[10px] text-rose-600/80 leading-tight">
+                      Sirine bahaya, alarm evakuasi, gempa, kebakaran, darurat.
                     </p>
                   </div>
                 </div>
@@ -3889,11 +3947,21 @@ export default function App() {
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white shadow-xs transition-all cursor-pointer disabled:opacity-50 ${
                     uploadCategory === 'darurat'
                       ? 'bg-rose-600 hover:bg-rose-700'
-                      : 'bg-blue-600 hover:bg-blue-700'
+                      : uploadCategory === 'safety'
+                        ? 'bg-amber-600 hover:bg-amber-700'
+                        : 'bg-blue-600 hover:bg-blue-700'
                   }`}
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>{isUploading ? 'Mengunggah...' : uploadCategory === 'darurat' ? 'Unggah Suara Darurat' : 'Unggah Suara'}</span>
+                  <span>
+                    {isUploading 
+                      ? 'Mengunggah...' 
+                      : uploadCategory === 'darurat' 
+                        ? 'Unggah Suara Darurat' 
+                        : uploadCategory === 'safety' 
+                          ? 'Unggah Suara K3' 
+                          : 'Unggah Suara Rutin'}
+                  </span>
                 </button>
               </div>
             </form>
@@ -3932,7 +4000,7 @@ export default function App() {
             <form onSubmit={handleCreateGroup} className="mt-4 flex gap-2">
               <input
                 type="text"
-                placeholder="Nama group baru (misal: Workshop, Dermaga 2...)"
+                placeholder="Nama group baru... contoh: Workshop, Dermaga 2"
                 value={newGroupName}
                 onChange={e => setNewGroupName(e.target.value)}
                 className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
@@ -4091,8 +4159,8 @@ export default function App() {
                       options={audioList.map(a => ({
                         value: a.filename,
                         label: a.display_name,
-                        sublabel: `${a.category === 'darurat' ? 'Darurat (EWS)' : 'Biasa'} • ${a.filename}`,
-                        icon: a.category === 'darurat' ? <Siren className="w-3.5 h-3.5 text-rose-500" /> : <Music className="w-3.5 h-3.5 text-slate-400" />
+                        sublabel: `${a.category === 'darurat' ? 'Darurat' : a.category === 'safety' ? 'K3 & Safety' : 'Rutin'} • ${a.filename}`,
+                        icon: a.category === 'darurat' ? <Siren className="w-3.5 h-3.5 text-rose-500" /> : a.category === 'safety' ? <HardHat className="w-3.5 h-3.5 text-amber-500" /> : <Music className="w-3.5 h-3.5 text-slate-400" />
                       }))}
                       variant="light"
                       className="w-full"
@@ -4112,7 +4180,7 @@ export default function App() {
                       options={audioList.map(a => ({
                         value: a.filename,
                         label: a.display_name,
-                        sublabel: `${a.category === 'darurat' ? 'Darurat (EWS)' : 'Biasa'} • ${a.filename}`,
+                        sublabel: `${a.category === 'darurat' ? 'Darurat' : a.category === 'safety' ? 'K3 & Safety' : 'Rutin'} • ${a.filename}`,
                         icon: <HardHat className="w-3.5 h-3.5 text-emerald-500" />
                       }))}
                       variant="light"
@@ -4126,7 +4194,7 @@ export default function App() {
               {/* Seksi Jaringan Multicast */}
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
-                  Jaringan Speaker Fisik (RTP)
+                  Jaringan Multicast Speaker Fisik
                 </label>
                 <div className="space-y-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
                   <div>

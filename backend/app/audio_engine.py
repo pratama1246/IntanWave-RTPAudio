@@ -52,7 +52,15 @@ class QueuedPlayback:
 
 
 def get_audio_priority(category: str, filename: str = "", title: str = "") -> int:
-    cat = (category or "").lower()
+    cat = (category or "").lower().strip()
+    if cat == "darurat":
+        return 1
+    if cat in ("safety", "k3"):
+        return 2
+    if cat == "biasa":
+        return 3
+
+    # Fallback to keyword matching if category is unset or unrecognized
     fn = (filename or "").lower()
     tt = (title or "").lower()
     combined = f"{cat} {fn} {tt}"
