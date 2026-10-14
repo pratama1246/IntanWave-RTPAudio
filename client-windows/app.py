@@ -117,7 +117,7 @@ class IntanWaveNodeWindow:
         # Dynamic window geometry calculation: prevents clipping on high-DPI displays
         self.root.update_idletasks()
         req_w = max(420, self.root.winfo_reqwidth() + 20)
-        req_h = max(470, self.root.winfo_reqheight() + 20)
+        req_h = max(410, self.root.winfo_reqheight() + 20)
         self.root.geometry(f"{req_w}x{req_h}")
 
         # Handle window close (X) -> minimize to tray
@@ -191,36 +191,26 @@ class IntanWaveNodeWindow:
         self.entry_zone.insert(0, ", ".join(self.receiver.groups))
         self.entry_zone.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
-        # 3. Form Konfigurasi Alamat RTP
-        cfg_frame = ttk.LabelFrame(main_frame, text=" Konfigurasi Alamat RTP ", padding="12 10 12 10")
+        # 3. Form Channel IP Phone Darurat (Opsional)
+        cfg_frame = ttk.LabelFrame(main_frame, text=" Channel Telepon Darurat (Opsional) ", padding="12 10 12 10")
         cfg_frame.pack(fill=tk.X, pady=(0, 10))
 
         cfg_grid = ttk.Frame(cfg_frame)
         cfg_grid.pack(fill=tk.X)
         cfg_grid.columnconfigure(1, weight=1)
 
-        ttk.Label(cfg_grid, text="Alamat IP Multicast:").grid(row=0, column=0, sticky=tk.W, pady=3)
-        self.entry_ip = ttk.Entry(cfg_grid)
-        self.entry_ip.insert(0, self.receiver.multicast_ip)
-        self.entry_ip.grid(row=0, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
-
-        ttk.Label(cfg_grid, text="Port RTP (UDP):").grid(row=1, column=0, sticky=tk.W, pady=3)
-        self.entry_port = ttk.Entry(cfg_grid)
-        self.entry_port.insert(0, str(self.receiver.multicast_port))
-        self.entry_port.grid(row=1, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
-
-        ttk.Label(cfg_grid, text="IP Phone Multicast:").grid(row=2, column=0, sticky=tk.W, pady=3)
+        ttk.Label(cfg_grid, text="IP Phone Multicast:").grid(row=0, column=0, sticky=tk.W, pady=3)
         self.entry_secondary_ip = ttk.Entry(cfg_grid)
         self.entry_secondary_ip.insert(0, self.receiver.secondary_channel_str)
-        self.entry_secondary_ip.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
+        self.entry_secondary_ip.grid(row=0, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
         lbl_hint = ttk.Label(
             cfg_grid, 
-            text="*Opsional: channel kedua (misal: 239.255.0.2 atau 239.255.0.2:5006)", 
+            text="*Khusus panggilan darurat dari Control Room (misal: 239.255.0.2)", 
             font=("Segoe UI", 7), 
             foreground="#64748b"
         )
-        lbl_hint.grid(row=3, column=1, sticky=tk.W, padx=(8, 0))
+        lbl_hint.grid(row=1, column=1, sticky=tk.W, padx=(8, 0), pady=(1, 0))
 
         # 4. Status Indikator Server (Live Heartbeat Badge)
         status_frame = ttk.Frame(main_frame)
@@ -268,8 +258,6 @@ class IntanWaveNodeWindow:
         new_server = self.entry_server.get().strip()
         new_name = self.entry_name.get().strip()
         new_zone = self.entry_zone.get().strip()
-        new_ip = self.entry_ip.get().strip()
-        new_port = self.entry_port.get().strip()
         new_sec = self.entry_secondary_ip.get().strip()
 
         if not new_server:
@@ -281,21 +269,14 @@ class IntanWaveNodeWindow:
         if not new_zone:
             messagebox.showwarning("Peringatan", "Group Audio tidak boleh kosong.\n(Pisahkan koma jika > 1, misal: Kantor, Satpam)", parent=self.root)
             return
-        if not new_ip or not new_port:
-            messagebox.showwarning("Peringatan", "Alamat IP Multicast dan Port tidak boleh kosong.", parent=self.root)
-            return
 
-        try:
-            port_num = int(new_port)
-            self.receiver.save_config(new_server, new_name, new_zone, new_ip, port_num, new_sec)
-            sec_msg = f"\nIP Phone: rtp://{new_sec}" if new_sec else ""
-            messagebox.showinfo(
-                "Berhasil", 
-                f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}\nReceiver: rtp://{new_ip}:{port_num}{sec_msg}",
-                parent=self.root
-            )
-        except ValueError:
-            messagebox.showerror("Error", "Port harus berupa angka valid (misal: 5004).", parent=self.root)
+        self.receiver.save_config(new_server, new_name, new_zone, secondary_channel=new_sec)
+        sec_msg = f"\nIP Phone: rtp://{new_sec}" if new_sec else ""
+        messagebox.showinfo(
+            "Berhasil", 
+            f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}{sec_msg}",
+            parent=self.root
+        )
 
     def update_heartbeat_status(self, connected: bool, info: dict):
         """Thread-safe status update untuk telemetri heartbeat dari server."""

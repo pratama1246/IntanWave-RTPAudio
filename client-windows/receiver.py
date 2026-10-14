@@ -250,7 +250,7 @@ class AudioReceiver:
                 pass
         return cfg
 
-    def save_config(self, server_url, device_name, groups_or_zone, ip, port, secondary_channel=""):
+    def save_config(self, server_url, device_name, groups_or_zone, ip=None, port=None, secondary_channel=""):
         """Menyimpan konfigurasi baru, me-restart listeners, dan mengirim heartbeat pembaruan ke server."""
         self.server_url = server_url.strip().rstrip("/")
         self.device_name = device_name.strip()
@@ -263,8 +263,10 @@ class AudioReceiver:
         if not self.groups:
             self.groups = ["Kantor"]
         self.zone = ", ".join(self.groups)
-        self.multicast_ip = ip.strip()
-        self.multicast_port = int(port)
+        if ip:
+            self.multicast_ip = ip.strip()
+        if port:
+            self.multicast_port = int(port)
 
         channels = [
             {
