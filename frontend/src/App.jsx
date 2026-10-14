@@ -5,7 +5,7 @@ import {
   Siren, HardHat, Copy, History, X, Search, 
   Wifi, Activity, Check,
   Headphones, Pause,
-  Layers, Edit2, AlertTriangle, ArrowRight, Laptop
+  Layers, Edit2, AlertTriangle, ArrowRight, Laptop, Users
 } from 'lucide-react';
 
 const DAYS_CONFIG = [
@@ -137,6 +137,449 @@ function CustomDropdown({
   );
 }
 
+// REUSABLE MULTI-TARGET SELECTOR (BISA CENTANG MULTI GROUP ATAU MULTI SPEAKER)
+function MultiTargetSelector({
+  targetMode = 'all', // 'all' | 'group' | 'speaker' (or 'custom')
+  selectedGroups = [], // string[]
+  selectedSpeakerIds = [], // number[]
+  onChange, // ({ targetMode, selectedGroups, selectedSpeakerIds }) => void
+  speakers = [],
+  groupsList = [],
+  variant = 'dark', // 'dark' | 'light'
+  size = 'sm',
+  className = '',
+  buttonClassName = '',
+  placeholder = 'Pilih Target Siaran'
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState(() => {
+    if (targetMode === 'group') return 'group';
+    if (targetMode === 'speaker' || targetMode === 'custom') return 'speaker';
+    return 'all';
+  });
+  const dropdownRef = useRef(null);
+
+  // Sync activeTab when targetMode changes externally
+  useEffect(() => {
+    if (targetMode === 'group') setActiveTab('group');
+    else if (targetMode === 'speaker' || targetMode === 'custom') setActiveTab('speaker');
+    else setActiveTab('all');
+  }, [targetMode]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    if (isOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+
+  // Active groups with speakers
+  const activeGroupsWithSpeakers = useMemo(() => {
+    return groupsList.filter(g => 
+      speakers.some(s => {
+        const sGrps = (s.groups && Array.isArray(s.groups) ? s.groups : [s.zone || '']).map(x => String(x).toLowerCase());
+        return sGrps.includes(g.toLowerCase());
+      })
+    );
+  }, [groupsList, speakers]);
+
+  // Online count
+  const onlineCount = useMemo(() => speakers.filter(s => s.status === 'online').length, [speakers]);
+
+  // Compute button label and icon
+  const summaryLabel = useMemo(() => {
+    if (targetMode === 'all') {
+      return `Semua Speaker (${speakers.length} spk)`;
+    }
+    if (targetMode === 'group') {
+      if (selectedGroups.length === 0) return 'Pilih Group...';
+      if (selectedGroups.length === 1) return `Group: ${selectedGroups[0]}`;
+      return `${selectedGroups.length} Group Terpilih`;
+    }
+    if (targetMode === 'speaker' || targetMode === 'custom') {
+      if (selectedSpeakerIds.length === 0) return 'Pilih Speaker...';
+      if (selectedSpeakerIds.length === 1) {
+        const sp = speakers.find(s => s.id === selectedSpeakerIds[0]);
+        return sp ? `Speaker: ${sp.name}` : `1 Speaker Terpilih`;
+      }
+      return `${selectedSpeakerIds.length} Speaker Terpilih`;
+    }
+    return placeholder;
+  }, [targetMode, selectedGroups, selectedSpeakerIds, speakers, placeholder]);
+
+  const handleSelectAllMode = () => {
+    setActiveTab('all');
+    onChange({
+      targetMode: 'all',
+      selectedGroups: [],
+      selectedSpeakerIds: []
+    });
+  };
+
+  const handleToggleGroup = (groupName) => {
+    const exists = selectedGroups.includes(groupName);
+    const updated = exists 
+      ? selectedGroups.filter(g => g !== groupName)
+      : [...selectedGroups, groupName];
+    
+    onChange({
+      targetMode: updated.length > 0 ? 'group' : 'all',
+      selectedGroups: updated,
+      selectedSpeakerIds: []
+    });
+  };
+
+  const handleSelectAllGroups = () => {
+    onChange({
+      targetMode: 'group',
+      selectedGroups: [...activeGroupsWithSpeakers],
+      selectedSpeakerIds: []
+    });
+  };
+
+  const handleClearGroups = () => {
+    onChange({
+      targetMode: 'all',
+      selectedGroups: [],
+      selectedSpeakerIds: []
+    });
+  };
+
+  const handleToggleSpeaker = (spkId) => {
+    const exists = selectedSpeakerIds.includes(spkId);
+    const updated = exists
+      ? selectedSpeakerIds.filter(id => id !== spkId)
+      : [...selectedSpeakerIds, spkId];
+
+    onChange({
+      targetMode: updated.length > 0 ? 'speaker' : 'all',
+      selectedGroups: [],
+      selectedSpeakerIds: updated
+    });
+  };
+
+  const handleSelectAllSpeakers = () => {
+    onChange({
+      targetMode: 'speaker',
+      selectedGroups: [],
+      selectedSpeakerIds: speakers.map(s => s.id)
+    });
+  };
+
+  const handleClearSpeakers = () => {
+    onChange({
+      targetMode: 'all',
+      selectedGroups: [],
+      selectedSpeakerIds: []
+    });
+  };
+
+  const isDark = variant === 'dark';
+
+  return (
+    <div className={`relative inline-block ${className}`} ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex items-center justify-between gap-2 rounded-xl transition-all font-medium text-xs cursor-pointer outline-hidden select-none ${
+          size === 'sm' ? 'px-2.5 py-1.5' : 'px-3 py-2'
+        } ${
+          isDark
+            ? 'bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 hover:border-slate-600 focus:ring-1 focus:ring-blue-400 shadow-xs'
+            : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-white hover:border-slate-300 focus:ring-2 focus:ring-blue-500/20 shadow-2xs'
+        } ${buttonClassName}`}
+      >
+        <span className="truncate flex items-center gap-1.5">
+          {targetMode === 'all' ? (
+            <Radio className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+          ) : targetMode === 'group' ? (
+            <Users className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          ) : (
+            <Volume2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          )}
+          <span className="truncate">{summaryLabel}</span>
+        </span>
+        <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${
+          isDark ? 'text-slate-400' : 'text-slate-500'
+        } ${isOpen ? 'rotate-180 text-blue-400' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div
+          className={`absolute left-0 top-full mt-1.5 w-80 max-w-[90vw] rounded-2xl p-3 z-50 shadow-2xl border animate-in fade-in zoom-in-95 duration-100 ${
+            isDark
+              ? 'bg-slate-900 border-slate-700/80 text-slate-200 ring-1 ring-white/10'
+              : 'bg-white border-slate-200 text-slate-700 shadow-xl'
+          }`}
+          style={{ minWidth: '320px' }}
+        >
+          {/* Header Tabs */}
+          <div className={`flex items-center p-1 rounded-xl gap-1 mb-2.5 ${
+            isDark ? 'bg-slate-800/90 border border-slate-700/50' : 'bg-slate-100'
+          }`}>
+            <button
+              type="button"
+              onClick={handleSelectAllMode}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-center ${
+                activeTab === 'all'
+                  ? isDark ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-blue-600 shadow-xs'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Semua
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('group');
+                if (targetMode !== 'group') {
+                  onChange({
+                    targetMode: 'group',
+                    selectedGroups: selectedGroups.length > 0 ? selectedGroups : (activeGroupsWithSpeakers.slice(0, 1)),
+                    selectedSpeakerIds: []
+                  });
+                }
+              }}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-center ${
+                activeTab === 'group'
+                  ? isDark ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-blue-600 shadow-xs'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Per Group {selectedGroups.length > 0 ? `(${selectedGroups.length})` : ''}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('speaker');
+                if (targetMode !== 'speaker' && targetMode !== 'custom') {
+                  onChange({
+                    targetMode: 'speaker',
+                    selectedGroups: [],
+                    selectedSpeakerIds: selectedSpeakerIds.length > 0 ? selectedSpeakerIds : (speakers[0] ? [speakers[0].id] : [])
+                  });
+                }
+              }}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer text-center ${
+                activeTab === 'speaker'
+                  ? isDark ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-blue-600 shadow-xs'
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Per Speaker {selectedSpeakerIds.length > 0 ? `(${selectedSpeakerIds.length})` : ''}
+            </button>
+          </div>
+
+          {/* TAB CONTENT: SEMUA SPEAKER */}
+          {activeTab === 'all' && (
+            <div className="py-2 px-1 text-center space-y-2">
+              <div className={`p-3 rounded-xl border text-left ${
+                isDark ? 'bg-slate-800/50 border-slate-700/60' : 'bg-blue-50/50 border-blue-100'
+              }`}>
+                <div className="flex items-center gap-2 font-semibold text-xs text-blue-500">
+                  <Radio className="w-4 h-4 animate-pulse" />
+                  <span>Siaran Global Aktif</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Audio akan dikirim ke seluruh speaker horn lapangan (Multicast RTP) dan seluruh PC kantor yang terhubung.
+                </p>
+                <div className="flex items-center gap-2 mt-2 text-[11px] font-medium text-slate-400">
+                  <span>{speakers.length} Speaker terdaftar</span>
+                  <span>•</span>
+                  <span className="text-emerald-500">{onlineCount} Online</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB CONTENT: PER GROUP (CHECKBOX MULTI) */}
+          {activeTab === 'group' && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[11px] px-1">
+                <span className="text-slate-400 font-medium">Bisa centang lebih dari 1 group:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllGroups}
+                    className="text-blue-500 hover:underline cursor-pointer font-medium"
+                  >
+                    Pilih Semua
+                  </button>
+                  <span className="text-slate-600">•</span>
+                  <button
+                    type="button"
+                    onClick={handleClearGroups}
+                    className="text-slate-400 hover:text-rose-400 cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                {activeGroupsWithSpeakers.length === 0 ? (
+                  <div className="text-center py-4 text-xs text-slate-400">
+                    Tidak ada group yang memiliki speaker aktif.
+                  </div>
+                ) : (
+                  activeGroupsWithSpeakers.map((grp) => {
+                    const isChecked = selectedGroups.includes(grp);
+                    const grpSpeakers = speakers.filter(s => {
+                      const sGrps = (s.groups && Array.isArray(s.groups) ? s.groups : [s.zone || '']).map(x => String(x).toLowerCase());
+                      return sGrps.includes(grp.toLowerCase());
+                    });
+                    const onCount = grpSpeakers.filter(s => s.status === 'online').length;
+
+                    return (
+                      <label
+                        key={grp}
+                        className={`flex items-center justify-between gap-2.5 p-2 rounded-xl text-xs cursor-pointer transition-all border ${
+                          isChecked
+                            ? isDark
+                              ? 'bg-blue-950/40 border-blue-500/40 text-blue-200'
+                              : 'bg-blue-50 border-blue-200 text-blue-900'
+                            : isDark
+                              ? 'bg-slate-800/40 border-slate-700/40 text-slate-300 hover:bg-slate-800'
+                              : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleGroup(grp)}
+                            className="rounded border-slate-600 text-blue-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                          />
+                          <span className="font-medium truncate">{grp}</span>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-700/30 text-slate-400 shrink-0">
+                          {grpSpeakers.length} spk ({onCount} on)
+                        </span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB CONTENT: PER SPEAKER (CHECKBOX MULTI) */}
+          {activeTab === 'speaker' && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[11px] px-1">
+                <span className="text-slate-400 font-medium">Bisa centang lebih dari 1 speaker:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllSpeakers}
+                    className="text-blue-500 hover:underline cursor-pointer font-medium"
+                  >
+                    Pilih Semua
+                  </button>
+                  <span className="text-slate-600">•</span>
+                  <button
+                    type="button"
+                    onClick={handleClearSpeakers}
+                    className="text-slate-400 hover:text-rose-400 cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                {speakers.length === 0 ? (
+                  <div className="text-center py-4 text-xs text-slate-400">
+                    Belum ada speaker terdaftar.
+                  </div>
+                ) : (
+                  speakers.map((spk) => {
+                    const isChecked = selectedSpeakerIds.includes(spk.id);
+                    const isOnline = spk.status === 'online';
+
+                    return (
+                      <label
+                        key={spk.id}
+                        className={`flex items-center justify-between gap-2.5 p-2 rounded-xl text-xs cursor-pointer transition-all border ${
+                          isChecked
+                            ? isDark
+                              ? 'bg-blue-950/40 border-blue-500/40 text-blue-200'
+                              : 'bg-blue-50 border-blue-200 text-blue-900'
+                            : isDark
+                              ? 'bg-slate-800/40 border-slate-700/40 text-slate-300 hover:bg-slate-800'
+                              : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSpeaker(spk.id)}
+                            className="rounded border-slate-600 text-blue-600 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-medium truncate flex items-center gap-1.5">
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                              <span className="truncate">{spk.name}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-mono block truncate">
+                              {spk.ip_address}
+                            </span>
+                          </div>
+                        </div>
+                        {spk.device_type === 'pc_node' && (
+                          <span className="text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+                            PC
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Footer Popover */}
+          <div className={`flex items-center justify-between pt-2.5 mt-2.5 border-t text-xs ${
+            isDark ? 'border-slate-800' : 'border-slate-100'
+          }`}>
+            <span className="text-[11px] text-slate-400 truncate max-w-[190px]">
+              {targetMode === 'all'
+                ? '🎯 Target: Semua Speaker'
+                : targetMode === 'group'
+                ? `👥 Target: ${selectedGroups.length} Group`
+                : `🔊 Target: ${selectedSpeakerIds.length} Speaker`}
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs cursor-pointer shadow-xs transition-colors"
+            >
+              Selesai
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   // Playback state (Field / Server Broadcast)
   const [playback, setPlayback] = useState({
@@ -166,6 +609,7 @@ export default function App() {
   // Broadcast Target Selection State
   const [targetMode, setTargetMode] = useState('all'); // 'all', 'group', 'speaker'
   const [selectedGroup, setSelectedGroup] = useState('Kantor');
+  const [selectedGroups, setSelectedGroups] = useState(['Kantor']);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState(null);
   const [selectedSpeakerIds, setSelectedSpeakerIds] = useState([]);
 
@@ -241,6 +685,7 @@ export default function App() {
     target_group: '',
     target_zone: '',
     target_speaker_id: 0,
+    target_speakers: '',
     target_multicast: true,
     target_local: true
   });
@@ -650,11 +1095,25 @@ export default function App() {
 
   // Helper build target payload for server broadcast
   const buildTargetPayload = () => {
+    if (targetMode === 'group' || targetMode === 'zone') {
+      const grps = selectedGroups && selectedGroups.length > 0 ? selectedGroups : (selectedGroup ? [selectedGroup] : []);
+      return {
+        target_mode: 'group',
+        target_groups: grps,
+        target_group: grps.join(', '),
+        target_zone: grps.join(', ')
+      };
+    }
+    if (targetMode === 'speaker' || targetMode === 'custom') {
+      const ids = selectedSpeakerIds && selectedSpeakerIds.length > 0 ? selectedSpeakerIds : (selectedSpeakerId ? [selectedSpeakerId] : []);
+      return {
+        target_mode: ids.length > 1 ? 'custom' : 'speaker',
+        speaker_ids: ids,
+        speaker_id: ids[0] || null
+      };
+    }
     return {
-      target_mode: (targetMode === 'group' || targetMode === 'zone') ? 'group' : targetMode,
-      target_group: (targetMode === 'group' || targetMode === 'zone') ? selectedGroup : null,
-      target_zone: (targetMode === 'group' || targetMode === 'zone') ? selectedGroup : null,
-      speaker_id: targetMode === 'speaker' ? selectedSpeakerId : null
+      target_mode: 'all'
     };
   };
 
@@ -920,6 +1379,7 @@ export default function App() {
       target_group: '',
       target_zone: '',
       target_speaker_id: 0,
+      target_speakers: '',
       target_multicast: true,
       target_local: true
     });
@@ -941,6 +1401,7 @@ export default function App() {
       target_group: schedule.target_group || schedule.target_zone || '',
       target_zone: schedule.target_group || schedule.target_zone || '',
       target_speaker_id: schedule.target_speaker_id || 0,
+      target_speakers: schedule.target_speakers || '',
       target_multicast: Boolean(schedule.target_multicast),
       target_local: Boolean(schedule.target_local)
     });
@@ -962,6 +1423,7 @@ export default function App() {
       target_group: schedule.target_group || schedule.target_zone || '',
       target_zone: schedule.target_group || schedule.target_zone || '',
       target_speaker_id: schedule.target_speaker_id || 0,
+      target_speakers: schedule.target_speakers || '',
       target_multicast: Boolean(schedule.target_multicast),
       target_local: Boolean(schedule.target_local)
     });
@@ -1442,14 +1904,23 @@ export default function App() {
                   <span>K3</span>
                 </button>
 
-                {/* TARGET SELECTOR DROPDOWN (LANGSUNG: SEMUA SPEAKER, ZONA 1, ZONA 2, DST) */}
-                <CustomDropdown
-                  value={currentTargetValue}
-                  onChange={handleTargetChange}
-                  options={targetOptions}
+                {/* MULTI TARGET SELECTOR (BISA CENTANG MULTI GROUP ATAU MULTI SPEAKER) */}
+                <MultiTargetSelector
+                  targetMode={targetMode}
+                  selectedGroups={selectedGroups}
+                  selectedSpeakerIds={selectedSpeakerIds}
+                  onChange={({ targetMode: tm, selectedGroups: sg, selectedSpeakerIds: spids }) => {
+                    setTargetMode(tm);
+                    setSelectedGroups(sg);
+                    setSelectedGroup(sg[0] || 'Kantor');
+                    setSelectedSpeakerIds(spids);
+                    setSelectedSpeakerId(spids[0] || null);
+                  }}
+                  speakers={speakers}
+                  groupsList={groupsList}
                   variant="dark"
                   size="sm"
-                  buttonClassName="min-w-[155px]"
+                  buttonClassName="min-w-[160px]"
                 />
 
                 {/* DENGAR DI WEB (PREVIEW BROWSER) */}
@@ -1656,8 +2127,13 @@ export default function App() {
                                 <span className="inline-flex items-center text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60 shrink-0">
                                   {(s.target_mode === 'group' || s.target_mode === 'zone') && (s.target_group || s.target_zone)
                                     ? `Group: ${s.target_group || s.target_zone}`
-                                    : s.target_mode === 'speaker' && s.target_speaker_id
-                                    ? `Speaker: ${speakers.find(sp => sp.id === s.target_speaker_id)?.name || `ID ${s.target_speaker_id}`}`
+                                    : (s.target_mode === 'speaker' || s.target_mode === 'custom') && (s.target_speakers || s.target_speaker_id)
+                                    ? (() => {
+                                        const ids = (s.target_speakers ? s.target_speakers.split(',') : [s.target_speaker_id]).map(x => parseInt(String(x).trim(), 10)).filter(Boolean);
+                                        if (ids.length > 1) return `${ids.length} Speaker Terpilih`;
+                                        const found = speakers.find(sp => sp.id === ids[0]);
+                                        return `Speaker: ${found?.name || `ID ${ids[0]}`}`;
+                                      })()
                                     : 'Semua Speaker'}
                                 </span>
                               </div>
@@ -2456,30 +2932,27 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Target Siaran</label>
-                <CustomDropdown
-                  value={
-                    (newSchedule.target_mode === 'group' || newSchedule.target_mode === 'zone') && (newSchedule.target_group || newSchedule.target_zone)
-                      ? `group:${newSchedule.target_group || newSchedule.target_zone}`
-                      : newSchedule.target_mode === 'speaker' && newSchedule.target_speaker_id
-                      ? `speaker:${newSchedule.target_speaker_id}`
-                      : 'all'
-                  }
-                  onChange={(val) => {
-                    if (val === 'all') {
-                      setNewSchedule(prev => ({ ...prev, target_mode: 'all', target_group: '', target_zone: '', target_speaker_id: 0 }));
-                    } else if (val.startsWith('group:') || val.startsWith('zone:')) {
-                      const gName = val.replace(/^(group:|zone:)/, '');
-                      setNewSchedule(prev => ({ ...prev, target_mode: 'group', target_group: gName, target_zone: gName, target_speaker_id: 0 }));
-                    } else if (val.startsWith('speaker:')) {
-                      setNewSchedule(prev => ({ ...prev, target_mode: 'speaker', target_group: '', target_zone: '', target_speaker_id: parseInt(val.replace('speaker:', ''), 10) }));
-                    }
+                <label className="block text-xs font-medium text-slate-700 mb-1">Target Siaran (Bisa Centang 2 atau Lebih)</label>
+                <MultiTargetSelector
+                  targetMode={newSchedule.target_mode || 'all'}
+                  selectedGroups={newSchedule.target_group ? newSchedule.target_group.split(',').map(s => s.trim()).filter(Boolean) : []}
+                  selectedSpeakerIds={newSchedule.target_speakers ? newSchedule.target_speakers.split(',').map(s => parseInt(s.trim(), 10)).filter(Boolean) : (newSchedule.target_speaker_id ? [newSchedule.target_speaker_id] : [])}
+                  onChange={({ targetMode: tm, selectedGroups: sg, selectedSpeakerIds: spids }) => {
+                    setNewSchedule(prev => ({
+                      ...prev,
+                      target_mode: tm,
+                      target_group: sg.join(', '),
+                      target_zone: sg.join(', '),
+                      target_speakers: spids.join(', '),
+                      target_speaker_id: spids[0] || 0
+                    }));
                   }}
-                  options={targetOptions}
+                  speakers={speakers}
+                  groupsList={groupsList}
                   variant="light"
-                  className="w-full"
+                  size="md"
                   buttonClassName="w-full bg-white justify-between"
-                  placeholder="Pilih target siaran..."
+                  className="w-full"
                 />
               </div>
 

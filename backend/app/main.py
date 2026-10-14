@@ -281,6 +281,7 @@ class PlayRequest(BaseModel):
     enable_local: Optional[bool] = None
     target_mode: Optional[str] = "all"  # 'all', 'group', 'zone', 'speaker', 'custom'
     target_group: Optional[str] = None
+    target_groups: Optional[List[str]] = None
     target_zone: Optional[str] = None
     speaker_id: Optional[int] = None
     speaker_ids: Optional[List[int]] = None
@@ -306,31 +307,35 @@ def play_audio(req: PlayRequest):
     target_endpoints = None
     target_desc = "Semua Speaker"
 
-    if req.target_mode in ("group", "zone") and (req.target_group or req.target_zone):
-        t_group = (req.target_group or req.target_zone).strip()
+    if req.target_mode in ("group", "zone") and (req.target_group or req.target_groups or req.target_zone):
+        raw_groups = list(req.target_groups or [])
+        if req.target_group:
+            raw_groups.extend([g.strip() for g in req.target_group.replace("[","").replace("]","").replace('"','').split(",") if g.strip()])
+        if req.target_zone:
+            raw_groups.extend([g.strip() for g in req.target_zone.replace("[","").replace("]","").replace('"','').split(",") if g.strip()])
+        target_groups = list(dict.fromkeys(raw_groups))
+
         with get_db() as conn:
             rows = conn.execute("SELECT id, name, ip_address, port, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
             matching_rows = []
             for r in rows:
                 grps = parse_groups(r["groups"] or r["zone"])
-                if t_group in grps or r["zone"] == t_group:
+                if any(tg.lower() in [x.lower() for x in grps] or (r["zone"] and r["zone"].lower() == tg.lower()) for tg in target_groups):
                     matching_rows.append(r)
             if matching_rows:
                 target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in matching_rows]
-                target_desc = f"Group {t_group} ({len(target_endpoints)} Speaker)"
-    elif req.target_mode == "speaker" and req.speaker_id:
-        with get_db() as conn:
-            sp = conn.execute("SELECT ip_address, port, name FROM speakers WHERE id = ? AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", (req.speaker_id,)).fetchone()
-            if sp:
-                target_endpoints = [f"{sp['ip_address']}:{sp['port']}"]
-                target_desc = f"Speaker {sp['name']}"
-    elif req.target_mode == "custom" and req.speaker_ids:
-        with get_db() as conn:
-            placeholders = ",".join(["?"] * len(req.speaker_ids))
-            rows = conn.execute(f"SELECT ip_address, port FROM speakers WHERE id IN ({placeholders}) AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", req.speaker_ids).fetchall()
-            if rows:
-                target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in rows]
-                target_desc = f"{len(target_endpoints)} Speaker Terpilih"
+                target_desc = f"Group {', '.join(target_groups)} ({len(target_endpoints)} Speaker)"
+    elif (req.target_mode in ("speaker", "custom") or req.speaker_id or req.speaker_ids):
+        ids = list(req.speaker_ids or [])
+        if req.speaker_id and req.speaker_id not in ids:
+            ids.append(req.speaker_id)
+        if ids:
+            with get_db() as conn:
+                placeholders = ",".join(["?"] * len(ids))
+                rows = conn.execute(f"SELECT ip_address, port, name FROM speakers WHERE id IN ({placeholders}) AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", ids).fetchall()
+                if rows:
+                    target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in rows]
+                    target_desc = f"{len(rows)} Speaker Terpilih" if len(rows) > 1 else f"Speaker {rows[0]['name']}"
     else:
         # Mode "all" (Semua Speaker): Kirim ke seluruh IP speaker fisik terdaftar + Multicast
         with get_db() as conn:
@@ -667,6 +672,7 @@ class ScheduleCreate(BaseModel):
     target_group: Optional[str] = ""
     target_zone: Optional[str] = ""
     target_speaker_id: Optional[int] = 0
+    target_speakers: Optional[str] = ""
     enabled: bool = True
 
 @app.get("/api/schedules")
@@ -707,9 +713,9 @@ def create_schedule(s: ScheduleCreate):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO schedules (name, audio_file_id, schedule_type, time_str, days_of_week, interval_hours, target_multicast, target_local, target_mode, target_group, target_zone, target_speaker_id, enabled)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (s.name, s.audio_file_id, s.schedule_type, norm_time, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, int(s.enabled)))
+            INSERT INTO schedules (name, audio_file_id, schedule_type, time_str, days_of_week, interval_hours, target_multicast, target_local, target_mode, target_group, target_zone, target_speaker_id, target_speakers, enabled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (s.name, s.audio_file_id, s.schedule_type, norm_time, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, s.target_speakers or "", int(s.enabled)))
         conn.commit()
 
     reload_schedules()
@@ -725,9 +731,9 @@ def update_schedule(schedule_id: int, s: ScheduleCreate):
             UPDATE schedules 
             SET name = ?, audio_file_id = ?, schedule_type = ?, time_str = ?, 
                 days_of_week = ?, interval_hours = ?, target_multicast = ?, target_local = ?,
-                target_mode = ?, target_group = ?, target_zone = ?, target_speaker_id = ?
+                target_mode = ?, target_group = ?, target_zone = ?, target_speaker_id = ?, target_speakers = ?
             WHERE id = ?
-        """, (s.name, s.audio_file_id, s.schedule_type, norm_time, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, schedule_id))
+        """, (s.name, s.audio_file_id, s.schedule_type, norm_time, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, s.target_speakers or "", schedule_id))
         conn.commit()
 
     reload_schedules()

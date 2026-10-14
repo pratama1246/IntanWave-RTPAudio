@@ -56,12 +56,22 @@ async def trigger_schedule_job(schedule_id: int):
                 if matching_rows:
                     target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in matching_rows]
                     target_desc = f"Group {', '.join(target_groups)} ({len(target_endpoints)} Speaker)"
-        elif tmode == "speaker" and tspk_id:
-            with get_db() as conn:
-                sp_row = conn.execute("SELECT ip_address, port, name FROM speakers WHERE id = ? AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", (tspk_id,)).fetchone()
-                if sp_row:
-                    target_endpoints = [f"{sp_row['ip_address']}:{sp_row['port']}"]
-                    target_desc = f"Speaker {sp_row['name']}"
+        elif tmode in ("speaker", "custom") and (tspk_id or ("target_speakers" in row.keys() and row["target_speakers"])):
+            ids = set()
+            if tspk_id:
+                ids.add(int(tspk_id))
+            tspk_ids_str = row["target_speakers"] if "target_speakers" in row.keys() else ""
+            if tspk_ids_str:
+                for x in str(tspk_ids_str).split(","):
+                    if x.strip().isdigit():
+                        ids.add(int(x.strip()))
+            if ids:
+                with get_db() as conn:
+                    placeholders = ",".join(["?"] * len(ids))
+                    sp_rows = conn.execute(f"SELECT ip_address, port, name FROM speakers WHERE id IN ({placeholders}) AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", list(ids)).fetchall()
+                    if sp_rows:
+                        target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in sp_rows]
+                        target_desc = f"{len(sp_rows)} Speaker Terpilih" if len(sp_rows) > 1 else f"Speaker {sp_rows[0]['name']}"
         else:
             with get_db() as conn:
                 sp_rows = conn.execute("SELECT ip_address, port FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
