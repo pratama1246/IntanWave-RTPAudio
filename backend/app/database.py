@@ -493,8 +493,8 @@ def upsert_node_heartbeat(
         d["zone"] = d["groups"][0] if d["groups"] else (d.get("zone") or "")
         return d
 
-def mark_stale_nodes_offline(timeout_seconds: int = 45) -> int:
-    """Menandai node PC client yang tidak mengirim heartbeat melebihi timeout menjadi offline."""
+def mark_stale_nodes_offline(timeout_seconds: int = 90) -> int:
+    """Menandai node PC client yang tidak mengirim heartbeat melebihi timeout (90 detik) menjadi offline."""
     now = datetime.now()
     with get_db() as conn:
         cursor = conn.cursor()

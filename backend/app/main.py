@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import shutil
 from pathlib import Path
@@ -509,6 +510,64 @@ async def stream_live(request: Request, node_id: str = ""):
         media_type="application/octet-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Audio-Format": "alaw;rate=8000;ch=1"},
     )
+
+@app.websocket("/ws/node/{node_id}")
+async def ws_node_stream(websocket: WebSocket, node_id: str):
+    """
+    Koneksi WebSocket real-time untuk PC client Windows (IntanWave Node).
+    Mendukung transmisi audio instan (binary frames) dan heartbeat/ping-pong otomatis.
+    """
+    node_id = (node_id or "").strip()
+    if not node_id:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    token, q = stream_hub.subscribe(node_id, asyncio.get_running_loop())
+    
+    # Perbarui status speaker jadi online
+    now_iso = datetime.now().isoformat()
+    with get_db() as conn:
+        conn.execute("UPDATE speakers SET status = 'online', latency_ms = 1, last_online = ? WHERE node_id = ?", (now_iso, node_id))
+        conn.commit()
+
+    async def send_audio():
+        while True:
+            chunk = await q.get()
+            chunks = [chunk]
+            while not q.empty() and len(chunks) < 10:
+                try:
+                    chunks.append(q.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            await websocket.send_bytes(b"".join(chunks))
+
+    async def recv_heartbeat():
+        while True:
+            msg = await websocket.receive_text()
+            if msg == "ping":
+                await websocket.send_text("pong")
+            elif msg.startswith("{"):
+                try:
+                    data = json.loads(msg)
+                    if data.get("type") == "heartbeat":
+                        upsert_node_heartbeat(
+                            node_id=node_id,
+                            device_name=data.get("device_name"),
+                            ip_address=websocket.client.host if websocket.client else "127.0.0.1",
+                            port=data.get("port", 5004),
+                            groups=data.get("groups"),
+                            hostname=data.get("hostname", "")
+                        )
+                except Exception:
+                    pass
+
+    try:
+        await asyncio.gather(send_audio(), recv_heartbeat())
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        pass
+    finally:
+        stream_hub.unsubscribe(token)
 
 @app.get("/api/speakers")
 def list_speakers():

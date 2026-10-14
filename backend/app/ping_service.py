@@ -57,7 +57,7 @@ async def check_speaker(speaker: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 from datetime import datetime
                 last_dt = datetime.fromisoformat(last_online_str)
-                is_online = (datetime.now() - last_dt).total_seconds() <= 45
+                is_online = (datetime.now() - last_dt).total_seconds() <= 90
             except Exception:
                 pass
         status = "online" if is_online else "offline"

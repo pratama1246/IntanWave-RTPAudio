@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import base64
 import socket
 import select
 import struct
@@ -563,107 +564,74 @@ class AudioReceiver:
         return sorted(ips)
 
     # =========================================================================
-    # 1. HTTP STREAM RECEIVER (Siaran Server PA Langsung via TCP/HTTP Stream)
+    # 1. WEBSOCKET AUDIO STREAM RECEIVER (Persistent RFC 6455 via stdlib socket)
     # =========================================================================
-    def _read_http_chunk(self, sock, cur_buf, timeout=0.25):
-        """
-        Membaca 1 HTTP chunked frame secara non-blocking via select.select.
-        Mengembalikan (chunk_bytes, sisa_buffer, is_alive).
-        """
-        while self.is_running:
-            if b"\r\n" not in cur_buf:
-                r, _, _ = select.select([sock], [], [], timeout)
-                if not r:
-                    return None, cur_buf, True
-                try:
-                    data = sock.recv(4096)
-                except Exception:
-                    return None, cur_buf, False
-                if not data:
-                    return None, cur_buf, False
-                cur_buf += data
+    def _recv_exact(self, sock, n):
+        buf = bytearray()
+        while len(buf) < n and self.is_running:
+            r, _, _ = select.select([sock], [], [], 0.25)
+            if not r:
                 continue
-
-            line, rest = cur_buf.split(b"\r\n", 1)
-            line = line.strip()
-            if not line:
-                cur_buf = rest
-                continue
-
-            # Parsing panjang chunk (heksadesimal)
             try:
-                chunk_len = int(line.split(b";")[0], 16)
-            except ValueError:
-                return None, b"", False
+                chunk = sock.recv(n - len(buf))
+            except Exception:
+                return None
+            if not chunk:
+                return None
+            buf.extend(chunk)
+        return bytes(buf) if len(buf) == n else None
 
-            if chunk_len == 0:
-                return None, rest, False  # Akhir stream chunked
-
-            # Pastikan seluruh chunk + \r\n penutup sudah terbaca
-            while len(rest) < chunk_len + 2 and self.is_running:
-                r, _, _ = select.select([sock], [], [], timeout)
-                if not r:
-                    return None, rest, True
-                try:
-                    data = sock.recv(4096)
-                except Exception:
-                    return None, rest, False
-                if not data:
-                    return None, rest, False
-                rest += data
-
-            chunk_data = rest[:chunk_len]
-            cur_buf = rest[chunk_len + 2:]
-            return chunk_data, cur_buf, True
-
-        return None, cur_buf, False
-
-    def _http_stream_loop(self):
+    def _ws_stream_loop(self):
         """
-        Koneksi HTTP persistent ke {server_url}/api/stream?node_id={node_id}.
-        Data audio dialirkan langsung saat ada siaran server tanpa perlu RTP/multicast.
+        Koneksi WebSocket persistent (RFC 6455) murni stdlib Python (tanpa dependensi eksternal).
+        Otomatis menangani frame audio biner, heartbeat ping/pong, dan reconnect instan.
         """
         while self.is_running:
             if not self.server_url or not self.node_id:
                 time.sleep(1)
                 continue
 
-            # Parse host & port dari server_url
             try:
                 parsed = urllib.parse.urlparse(self.server_url)
                 host = parsed.hostname or "127.0.0.1"
                 port = parsed.port or (443 if parsed.scheme == "https" else 80)
-                path = f"/api/stream?node_id={urllib.parse.quote(self.node_id)}"
+                path = f"/ws/node/{urllib.parse.quote(self.node_id)}"
             except Exception as e:
-                print(f"[HTTP Stream] Format URL salah ({self.server_url}):", e)
                 time.sleep(2)
                 continue
 
             sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                if sys.platform == "win32" and hasattr(socket, "SIO_KEEPALIVE_VALS"):
+                    try:
+                        sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, 15000, 5000))
+                    except Exception:
+                        pass
                 sock.settimeout(5.0)
                 sock.connect((host, port))
-                sock.setblocking(False)
 
-                # Kirim HTTP Request
+                # WebSocket Handshake (RFC 6455)
+                sec_key = base64.b64encode(os.urandom(16)).decode("ascii")
                 req_lines = [
                     f"GET {path} HTTP/1.1",
                     f"Host: {host}:{port}",
+                    "Upgrade: websocket",
+                    "Connection: Upgrade",
+                    f"Sec-WebSocket-Key: {sec_key}",
+                    "Sec-WebSocket-Version: 13",
                     "User-Agent: IntanWaveNode/1.0",
-                    "Accept: application/octet-stream",
-                    "Connection: keep-alive",
                     "",
                     ""
                 ]
-                req_raw = "\r\n".join(req_lines).encode("ascii")
-                sock.sendall(req_raw)
+                sock.sendall("\r\n".join(req_lines).encode("ascii"))
 
-                # Baca Header Respons HTTP
+                # Baca respons handshake
                 hdr_buf = b""
                 connected_ok = False
                 while self.is_running:
-                    r, _, _ = select.select([sock], [], [], 0.5)
+                    r, _, _ = select.select([sock], [], [], 1.0)
                     if not r:
                         continue
                     chunk = sock.recv(2048)
@@ -671,21 +639,11 @@ class AudioReceiver:
                         break
                     hdr_buf += chunk
                     if b"\r\n\r\n" in hdr_buf:
-                        connected_ok = True
+                        if b"101 " in hdr_buf and b"Switching Protocols" in hdr_buf:
+                            connected_ok = True
                         break
 
                 if not connected_ok or not self.is_running:
-                    try:
-                        sock.close()
-                    except Exception:
-                        pass
-                    time.sleep(1.5)
-                    continue
-
-                parts = hdr_buf.split(b"\r\n\r\n", 1)
-                status_line = parts[0].split(b"\r\n")[0].decode("ascii", errors="replace")
-                if " 200 " not in status_line:
-                    print(f"[HTTP Stream] Server merespons {status_line}, mencoba ulang...")
                     try:
                         sock.close()
                     except Exception:
@@ -694,36 +652,91 @@ class AudioReceiver:
                     continue
 
                 self.stream_sock = sock
-                cur_buf = parts[1] if len(parts) > 1 else b""
-                print(f"[*] IntanWave Node tersambung ke HTTP Audio Stream ({self.server_url})")
+                sock.setblocking(False)
+                self.server_connected = True
+                print(f"[*] IntanWave Node tersambung via WebSocket Audio Stream ({self.server_url})")
 
-                # Loop penerimaan audio
+                last_ping_time = time.time()
+
+                # Loop membaca frame WebSocket
                 while self.is_running:
-                    audio_chunk, cur_buf, ok = self._read_http_chunk(sock, cur_buf, timeout=0.25)
-                    if not ok:
+                    now = time.time()
+                    if now - last_ping_time > 20.0:
+                        last_ping_time = now
+                        try:
+                            ping_payload = b"ping"
+                            mask = os.urandom(4)
+                            frame_hdr = bytearray([0x81, 0x80 | len(ping_payload)])
+                            frame_hdr.extend(mask)
+                            frame_hdr.extend(bytes(b ^ mask[i % 4] for i, b in enumerate(ping_payload)))
+                            sock.sendall(frame_hdr)
+                        except Exception:
+                            break
+
+                    r, _, _ = select.select([sock], [], [], 0.25)
+                    if not r:
+                        continue
+
+                    hdr = self._recv_exact(sock, 2)
+                    if not hdr:
+                        break
+                    b0, b1 = hdr[0], hdr[1]
+                    opcode = b0 & 0x0F
+                    masked = (b1 & 0x80) != 0
+                    length = b1 & 0x7F
+
+                    if length == 126:
+                        ext = self._recv_exact(sock, 2)
+                        if not ext: break
+                        length = struct.unpack("!H", ext)[0]
+                    elif length == 127:
+                        ext = self._recv_exact(sock, 8)
+                        if not ext: break
+                        length = struct.unpack("!Q", ext)[0]
+
+                    mask_key = None
+                    if masked:
+                        mask_key = self._recv_exact(sock, 4)
+                        if not mask_key: break
+
+                    payload = self._recv_exact(sock, length) if length > 0 else b""
+                    if payload is None:
+                        break
+                    if masked and mask_key:
+                        payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+
+                    # Opcode 0x2: Biner Audio Frame
+                    if opcode == 0x2:
+                        now_audio = time.time()
+                        if self.active_source == "RTP" and (now_audio - self.last_audio_time < 0.8):
+                            continue
+
+                        if self.active_source != "WS":
+                            self.active_source = "WS"
+                            self.set_status("STREAMING", "biasa", "Siaran Server PA")
+                            self.notify_toast("IntanWave — Siaran Server", f"Menerima siaran audio dari {self.server_url}")
+                            threading.Thread(target=self._fetch_playback_info, daemon=True).start()
+                            self._start_player("alaw")
+
+                        self.last_audio_time = now_audio
+                        self._feed_player(payload)
+
+                    # Opcode 0x9: Ping dari server -> balas Pong (Opcode 0xA)
+                    elif opcode == 0x9:
+                        try:
+                            mask = os.urandom(4)
+                            pong_hdr = bytearray([0x8A, 0x80 | len(payload)])
+                            pong_hdr.extend(mask)
+                            pong_hdr.extend(bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+                            sock.sendall(pong_hdr)
+                        except Exception:
+                            break
+
+                    # Opcode 0x8: Close
+                    elif opcode == 0x8:
                         break
 
-                    if not audio_chunk:
-                        continue
-
-                    now = time.time()
-                    # Jika ada panggilan RTP dari IP Phone yang sedang aktif, biarkan IP Phone
-                    if self.active_source == "RTP" and (now - self.last_audio_time < 0.8):
-                        continue
-
-                    # Mulai pemutaran jika belum aktif
-                    if self.active_source != "HTTP":
-                        self.active_source = "HTTP"
-                        self.set_status("STREAMING", "biasa", "Siaran Server PA")
-                        self.notify_toast("IntanWave — Siaran Server", f"Menerima siaran audio dari {self.server_url}")
-                        threading.Thread(target=self._fetch_playback_info, daemon=True).start()
-                        self._start_player("alaw")
-
-                    self.last_audio_time = now
-                    self._feed_player(audio_chunk)
-
-            except Exception as e:
-                # Menangani putus koneksi jaringan/reboot server
+            except Exception:
                 pass
             finally:
                 if sock:
@@ -731,10 +744,11 @@ class AudioReceiver:
                         sock.close()
                     except Exception:
                         pass
-                self.stream_sock = None
+                if self.stream_sock == sock:
+                    self.stream_sock = None
 
             if self.is_running:
-                if self.active_source == "HTTP":
+                if self.active_source == "WS":
                     self._close_player()
                     self.active_source = None
                     self.set_status("STANDBY", "biasa", "")
@@ -848,8 +862,8 @@ class AudioReceiver:
         if not payload:
             return
 
-        # Jika siaran server PA via HTTP sedang aktif, IP Phone diabaikan agar tidak tumpang tindih
-        if self.active_source == "HTTP" and (now - self.last_audio_time < 0.8):
+        # Jika siaran server PA via WebSocket/HTTP sedang aktif, IP Phone diabaikan agar tidak tumpang tindih
+        if self.active_source in ("WS", "HTTP") and (now - self.last_audio_time < 0.8):
             return
 
         if self.active_source != "RTP":
@@ -913,8 +927,8 @@ class AudioReceiver:
             return
         self.is_running = True
 
-        self.http_thread = threading.Thread(target=self._http_stream_loop, daemon=True)
-        self.http_thread.start()
+        self.stream_thread = threading.Thread(target=self._ws_stream_loop, daemon=True)
+        self.stream_thread.start()
 
         self.udp_thread = threading.Thread(target=self._udp_rtp_loop, daemon=True)
         self.udp_thread.start()
