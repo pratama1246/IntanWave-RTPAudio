@@ -413,8 +413,15 @@ def upsert_node_heartbeat(
         cursor.execute("SELECT * FROM speakers WHERE node_id = ?", (node_id,))
         existing = cursor.fetchone()
 
-        # Deteksi jika ada 2 PC berbeda yang mengirim node_id yang sama (misal hasil cloning/copy folder)
-        if existing and existing["ip_address"] != ip_address and (hostname and existing["hostname"] != hostname or existing["ip_address"]):
+        # Deteksi jika ada 2 PC berbeda yang mengirim node_id yang sama (misal hasil cloning/copy folder).
+        # Hanya dianggap clone jika hostname BERBEDA. Hostname sama + IP berubah = DHCP/WiFi roaming -> cukup update IP.
+        if (
+            existing
+            and existing["ip_address"] != ip_address
+            and hostname
+            and existing["hostname"]
+            and existing["hostname"] != hostname
+        ):
             is_cloned_node = False
             if existing["last_online"]:
                 try:

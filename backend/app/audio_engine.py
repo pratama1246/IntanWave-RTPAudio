@@ -1,6 +1,7 @@
 import subprocess
 import threading
 import time
+import random
 import shutil
 from pathlib import Path
 from typing import Optional, Callable, List
@@ -123,6 +124,10 @@ class AudioEngine:
 
         # 1. Output RTP (Multicast atau Selektif)
         if self.enable_multicast:
+            # Hilangkan endpoint duplikat (urutan dipertahankan)
+            if target_endpoints:
+                target_endpoints = list(dict.fromkeys(target_endpoints))
+
             # Tentukan output destinations
             if target_endpoints and len(target_endpoints) > 0:
                 if len(target_endpoints) == 1:
@@ -133,8 +138,13 @@ class AudioEngine:
                         "-f", "rtp", f"rtp://{target_endpoints[0]}?pkt_size=172"
                     ]
                 else:
-                    # FFmpeg tee muxer untuk multiple unicast outputs
-                    tee_outputs = "|".join([f"[select=a:f=rtp]rtp://{ep}?pkt_size=172" for ep in target_endpoints])
+                    # FFmpeg tee muxer untuk multiple outputs. Semua output memakai SSRC & seq awal yang SAMA
+                    # agar client yang menerima unicast + multicast dapat membuang paket duplikat (anti audio dobel).
+                    shared_ssrc = random.randint(1, 2**31 - 1)
+                    tee_outputs = "|".join([
+                        f"[select=a:f=rtp:ssrc={shared_ssrc}:seq=0]rtp://{ep}?pkt_size=172"
+                        for ep in target_endpoints
+                    ])
                     rtp_args = [
                         "-af", "aresample=8000:async=1,asetnsamples=n=160",
                         "-map", "0:a",
