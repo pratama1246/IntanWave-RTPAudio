@@ -642,24 +642,46 @@ def list_schedules():
         """).fetchall()
         return [dict(r) for r in rows]
 
+def normalize_time_str(time_str: str) -> str:
+    """Membersihkan, mendeduplikasi, dan mengurutkan secara kronologis multi-jam (misal '15:00, 08:00' -> '08:00, 15:00')."""
+    if not time_str:
+        return "08:00"
+    times = set()
+    for t in time_str.split(","):
+        t_clean = t.strip()
+        if ":" in t_clean:
+            parts = t_clean.split(":")
+            try:
+                h = int(parts[0])
+                m = int(parts[1])
+                if 0 <= h <= 23 and 0 <= m <= 59:
+                    times.add(f"{h:02d}:{m:02d}")
+            except Exception:
+                pass
+    if not times:
+        return "08:00"
+    return ", ".join(sorted(list(times)))
+
 @app.post("/api/schedules")
 def create_schedule(s: ScheduleCreate):
     t_group = (s.target_group or s.target_zone or "").strip()
+    norm_time = normalize_time_str(s.time_str)
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO schedules (name, audio_file_id, schedule_type, time_str, days_of_week, interval_hours, target_multicast, target_local, target_mode, target_group, target_zone, target_speaker_id, enabled)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (s.name, s.audio_file_id, s.schedule_type, s.time_str, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, int(s.enabled)))
+        """, (s.name, s.audio_file_id, s.schedule_type, norm_time, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, int(s.enabled)))
         conn.commit()
 
     reload_schedules()
-    log_event("SCHEDULE_CREATED", f"Membuat jadwal baru: '{s.name}' pada {s.time_str}")
+    log_event("SCHEDULE_CREATED", f"Membuat jadwal baru: '{s.name}' pada {norm_time}")
     return {"message": "Jadwal berhasil dibuat"}
 
 @app.put("/api/schedules/{schedule_id}")
 def update_schedule(schedule_id: int, s: ScheduleCreate):
     t_group = (s.target_group or s.target_zone or "").strip()
+    norm_time = normalize_time_str(s.time_str)
     with get_db() as conn:
         conn.execute("""
             UPDATE schedules 
@@ -667,11 +689,11 @@ def update_schedule(schedule_id: int, s: ScheduleCreate):
                 days_of_week = ?, interval_hours = ?, target_multicast = ?, target_local = ?,
                 target_mode = ?, target_group = ?, target_zone = ?, target_speaker_id = ?
             WHERE id = ?
-        """, (s.name, s.audio_file_id, s.schedule_type, s.time_str, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, schedule_id))
+        """, (s.name, s.audio_file_id, s.schedule_type, norm_time, s.days_of_week, s.interval_hours, int(s.target_multicast), int(s.target_local), s.target_mode or "all", t_group, t_group, s.target_speaker_id or 0, schedule_id))
         conn.commit()
 
     reload_schedules()
-    log_event("SCHEDULE_UPDATED", f"Memperbarui jadwal: '{s.name}' pada {s.time_str}")
+    log_event("SCHEDULE_UPDATED", f"Memperbarui jadwal: '{s.name}' pada {norm_time}")
     return {"message": "Jadwal berhasil diperbarui"}
 
 @app.patch("/api/schedules/{schedule_id}/toggle")

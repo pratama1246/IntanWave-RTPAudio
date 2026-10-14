@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import socket
+import select
 import struct
 import threading
 import subprocess
@@ -86,6 +87,7 @@ class AudioReceiver:
         self.zone = ", ".join(self.groups)
         self.multicast_ip = self.config.get("multicast_ip", "239.255.0.1")
         self.multicast_port = int(self.config.get("multicast_port", 5004))
+        self.channels = self._init_channels()
         
         self.status = "STANDBY"  # STANDBY | STREAMING
         self.current_category = "biasa"  # biasa | darurat
@@ -105,6 +107,8 @@ class AudioReceiver:
         self.player_proc = None
         self.last_packet_time = 0
         self.sock = None
+        self.sockets = []
+        self.sock_to_channels = {}
         self.thread = None
         self.heartbeat_thread = None
         self.last_toast_time = 0
@@ -113,6 +117,51 @@ class AudioReceiver:
         self.seen_seqs = set()
         self.seen_seq_history = []
         self.max_history = 512
+
+    def _init_channels(self):
+        """Membaca daftar channel RTP dari konfigurasi atau membuat default (Server + IP Phone)."""
+        raw_channels = self.config.get("channels")
+        channels = []
+        if isinstance(raw_channels, list) and len(raw_channels) > 0:
+            for ch in raw_channels:
+                if isinstance(ch, dict) and ch.get("ip"):
+                    channels.append({
+                        "name": ch.get("name", "Channel RTP"),
+                        "ip": str(ch.get("ip", "")).strip(),
+                        "port": int(ch.get("port", self.multicast_port))
+                    })
+        
+        # Pastikan channel primary selalu terdaftar
+        has_primary = any(c["ip"] == self.multicast_ip and c["port"] == self.multicast_port for c in channels)
+        if not has_primary:
+            channels.insert(0, {
+                "name": "Server IntanWave",
+                "ip": self.multicast_ip,
+                "port": self.multicast_port
+            })
+
+        # Pastikan ada channel secondary jika ada di config (misal IP Phone)
+        sec_str = self.config.get("secondary_multicast", "")
+        if sec_str and not any("phone" in c["name"].lower() or "control" in c["name"].lower() for c in channels):
+            sec_ip = sec_str.split(":")[0].strip()
+            sec_port = int(sec_str.split(":")[1].strip()) if ":" in sec_str else self.multicast_port
+            if sec_ip:
+                channels.append({
+                    "name": "Control Room IP Phone",
+                    "ip": sec_ip,
+                    "port": sec_port
+                })
+
+        return channels
+
+    @property
+    def secondary_channel_str(self):
+        """String pembantu untuk GUI (IP:Port channel kedua/IP Phone)."""
+        sec = [c for c in self.channels if c["ip"] != self.multicast_ip or c["port"] != self.multicast_port]
+        if sec:
+            p = sec[0]["port"]
+            return f"{sec[0]['ip']}:{p}" if p != self.multicast_port else sec[0]["ip"]
+        return self.config.get("secondary_multicast", "")
 
     def load_config(self):
         cfg = {}
@@ -147,6 +196,20 @@ class AudioReceiver:
         if not cfg.get("multicast_port"):
             cfg["multicast_port"] = 5004
             changed = True
+        if "channels" not in cfg:
+            cfg["channels"] = [
+                {
+                    "name": "Server IntanWave",
+                    "ip": cfg.get("multicast_ip", "239.255.0.1"),
+                    "port": int(cfg.get("multicast_port", 5004))
+                },
+                {
+                    "name": "Control Room IP Phone",
+                    "ip": "239.255.0.2",
+                    "port": 5004
+                }
+            ]
+            changed = True
         if "enable_toast" not in cfg:
             cfg["enable_toast"] = True
             changed = True
@@ -163,7 +226,7 @@ class AudioReceiver:
                 pass
         return cfg
 
-    def save_config(self, server_url, device_name, groups_or_zone, ip, port):
+    def save_config(self, server_url, device_name, groups_or_zone, ip, port, secondary_channel=""):
         """Menyimpan konfigurasi baru, me-restart socket receiver, dan mengirim heartbeat pembaruan ke server."""
         self.server_url = server_url.strip().rstrip("/")
         self.device_name = device_name.strip()
@@ -179,6 +242,26 @@ class AudioReceiver:
         self.multicast_ip = ip.strip()
         self.multicast_port = int(port)
             
+        # Update daftar channels
+        channels = [
+            {
+                "name": "Server IntanWave",
+                "ip": self.multicast_ip,
+                "port": self.multicast_port
+            }
+        ]
+        sec_clean = secondary_channel.strip() if secondary_channel else ""
+        if sec_clean:
+            sec_ip = sec_clean.split(":")[0].strip()
+            sec_port = int(sec_clean.split(":")[1].strip()) if ":" in sec_clean else self.multicast_port
+            if sec_ip:
+                channels.append({
+                    "name": "Control Room IP Phone",
+                    "ip": sec_ip,
+                    "port": sec_port
+                })
+        self.channels = channels
+
         data = {
             "server_url": self.server_url,
             "node_id": self.node_id,
@@ -187,6 +270,7 @@ class AudioReceiver:
             "zone": self.zone,
             "multicast_ip": self.multicast_ip,
             "multicast_port": self.multicast_port,
+            "channels": self.channels,
             "enable_toast": self.config.get("enable_toast", True),
             "volume": self.config.get("volume", 100)
         }
@@ -359,12 +443,18 @@ class AudioReceiver:
     def stop(self):
         self.is_running = False
         self._close_player()
+        for s in self.sockets:
+            try:
+                s.close()
+            except Exception:
+                pass
+        self.sockets.clear()
         if self.sock:
             try:
                 self.sock.close()
             except Exception:
                 pass
-        self.sock = None
+            self.sock = None
 
     def _close_player(self):
         if self.player_proc:
@@ -387,138 +477,181 @@ class AudioReceiver:
         self.seen_seq_history.clear()
 
     def _run_loop(self):
-        """Loop utama background mendengarkan paket RTP Multicast atau Unicast."""
+        """Loop utama background mendengarkan paket RTP dari semua channel yang terdaftar (Server + IP Phone)."""
         while self.is_running:
-            try:
-                self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-                self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                self.sock.bind(("", self.multicast_port))
-                
-                # Cek apakah alamat tujuan adalah Multicast (224.0.0.0 - 239.255.255.255)
-                is_multicast = False
+            # Tutup socket lama jika ada
+            for s in self.sockets:
                 try:
-                    first_octet = int(self.multicast_ip.strip().split(".")[0])
-                    is_multicast = (224 <= first_octet <= 239)
+                    s.close()
                 except Exception:
                     pass
+            self.sockets.clear()
+            self.sock_to_channels.clear()
 
-                if is_multicast:
-                    # Join Multicast Group pada default adapter (INADDR_ANY)
-                    try:
-                        mreq = struct.pack("4sl", socket.inet_aton(self.multicast_ip), socket.INADDR_ANY)
-                        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-                    except Exception as e:
-                        print("Warning: gagal bind INADDR_ANY multicast:", e)
+            # Kelompokkan channel berdasarkan nomor port UDP
+            port_map = {}
+            for ch in self.channels:
+                p = int(ch.get("port", self.multicast_port))
+                if p not in port_map:
+                    port_map[p] = []
+                port_map[p].append(ch)
 
-                    # Join pada semua adapter jaringan aktif (Ethernet, WiFi, dll)
-                    # untuk memastikan paket diterima meski ada multiple NIC
-                    try:
-                        hostname = socket.gethostname()
-                        for iface_ip in socket.gethostbyname_ex(hostname)[2]:
-                            if not iface_ip.startswith("127."):
-                                try:
-                                    mreq_if = struct.pack("4s4s", socket.inet_aton(self.multicast_ip), socket.inet_aton(iface_ip))
-                                    self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq_if)
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
+            # Bind socket per port dan join grup multicast terkait
+            for p, ch_list in port_map.items():
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.bind(("", p))
 
-                self.sock.settimeout(0.5)
-                break
-            except Exception as e:
-                print(f"Gagal bind socket ({e}), mencoba kembali...")
+                    for ch in ch_list:
+                        ch_ip = ch.get("ip", "").strip()
+                        is_mc = False
+                        try:
+                            first_oct = int(ch_ip.split(".")[0])
+                            is_mc = (224 <= first_oct <= 239)
+                        except Exception:
+                            pass
+
+                        if is_mc:
+                            try:
+                                mreq = struct.pack("4sl", socket.inet_aton(ch_ip), socket.INADDR_ANY)
+                                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+                            except Exception as e:
+                                print(f"Warning: gagal bind INADDR_ANY multicast {ch_ip}:", e)
+
+                            # Join pada semua adapter jaringan aktif
+                            try:
+                                hostname = socket.gethostname()
+                                for iface_ip in socket.gethostbyname_ex(hostname)[2]:
+                                    if not iface_ip.startswith("127."):
+                                        try:
+                                            mreq_if = struct.pack("4s4s", socket.inet_aton(ch_ip), socket.inet_aton(iface_ip))
+                                            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq_if)
+                                        except Exception:
+                                            pass
+                            except Exception:
+                                pass
+
+                    sock.setblocking(False)
+                    self.sockets.append(sock)
+                    self.sock_to_channels[sock] = ch_list
+                except Exception as e:
+                    print(f"Gagal bind socket port {p} ({e}), mencoba kembali...")
+
+            if not self.sockets:
                 time.sleep(1)
+                continue
 
-        print(f"[*] IntanWave Node standby pada rtp://{self.multicast_ip}:{self.multicast_port}")
+            self.sock = self.sockets[0]
+            ch_info_str = ", ".join([f"{c['name']} (rtp://{c['ip']}:{c['port']})" for c in self.channels])
+            print(f"[*] IntanWave Node standby mendengarkan {len(self.channels)} channel RTP: {ch_info_str}")
+            break
 
         while self.is_running:
             try:
-                data, _ = self.sock.recvfrom(2048)
-                now = time.time()
-                self.last_packet_time = now
+                # Periksa paket masuk di seluruh socket (Server PA + IP Phone)
+                readable, _, _ = select.select(self.sockets, [], [], 0.5)
+                if not readable:
+                    # Timeout: cek apakah aliran paket berhenti > 1.2 detik
+                    if self.status == "STREAMING" and (time.time() - self.last_packet_time > 1.2):
+                        self._close_player()
+                        self.set_status("STANDBY", "biasa", "")
+                    continue
 
-                # Parsing Header RTP RFC 3550
-                if len(data) >= 12:
-                    b0 = data[0]
-                    cc = b0 & 0x0F
-                    x_bit = (b0 >> 4) & 0x01
-                    seq_num = struct.unpack("!H", data[2:4])[0]
-
-                    # Deduplikasi RTP: abaikan paket jika seq_num sudah pernah diproses baru-baru ini
-                    # Mencegah echo/gema akibat paket ganda (Unicast + Multicast bersamaan)
-                    if seq_num in self.seen_seqs:
+                for sock in readable:
+                    try:
+                        data, addr = sock.recvfrom(2048)
+                    except Exception:
                         continue
 
-                    self.seen_seqs.add(seq_num)
-                    self.seen_seq_history.append(seq_num)
-                    if len(self.seen_seq_history) > self.max_history:
-                        oldest = self.seen_seq_history.pop(0)
-                        self.seen_seqs.discard(oldest)
+                    now = time.time()
+                    self.last_packet_time = now
 
-                    offset = 12 + (cc * 4)
-                    if x_bit and len(data) >= offset + 4:
-                        ext_len = struct.unpack("!H", data[offset + 2:offset + 4])[0]
-                        offset += 4 + (ext_len * 4)
+                    # Parsing Header RTP RFC 3550
+                    if len(data) >= 12:
+                        b0 = data[0]
+                        cc = b0 & 0x0F
+                        x_bit = (b0 >> 4) & 0x01
+                        pt = data[1] & 0x7F
+                        seq_num = struct.unpack("!H", data[2:4])[0]
 
-                    payload = data[offset:] if len(data) > offset else None
+                        # Deduplikasi RTP: cegah echo ganda
+                        if seq_num in self.seen_seqs:
+                            continue
 
-                    # Jika player belum jalan, picu notifikasi dan mulai ffplay baru
-                    if payload:
-                        if self.player_proc is None:
-                            # 1. Picu notifikasi SEKETIKA saat paket pertama masuk
-                            self.notify_toast(
-                                "IntanWave — Siaran Masuk",
-                                f"Sedang mengudara ke {self.device_name}"
-                            )
-                            self.set_status("STREAMING", "biasa", "")
-                            threading.Thread(target=self._fetch_playback_info, daemon=True).start()
+                        self.seen_seqs.add(seq_num)
+                        self.seen_seq_history.append(seq_num)
+                        if len(self.seen_seq_history) > self.max_history:
+                            oldest = self.seen_seq_history.pop(0)
+                            self.seen_seqs.discard(oldest)
 
-                            vol = int(self.config.get("volume", 100))
-                            vol = max(0, min(100, vol))
-                            
-                            cmd = [
-                                get_ffplay_bin(),
-                                "-nodisp",
-                                "-autoexit",
-                                "-loglevel", "quiet",
-                                "-probesize", "32",
-                                "-analyzeduration", "0",
-                                "-fflags", "nobuffer",
-                                "-flags", "low_delay",
-                                "-volume", str(vol),
-                                "-f", "alaw",
-                                "-sample_rate", "8000",
-                                "-ch_layout", "mono",
-                                "-i", "-"
-                            ]
-                            self.player_proc = subprocess.Popen(
-                                cmd,
-                                stdin=subprocess.PIPE,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-                            )
+                        offset = 12 + (cc * 4)
+                        if x_bit and len(data) >= offset + 4:
+                            ext_len = struct.unpack("!H", data[offset + 2:offset + 4])[0]
+                            offset += 4 + (ext_len * 4)
 
-                        # Tulis audio payload ke stdin ffplay
-                        if self.player_proc and self.player_proc.stdin:
-                            try:
-                                if self.player_proc.poll() is not None:
+                        payload = data[offset:] if len(data) > offset else None
+
+                        if payload:
+                            if self.player_proc is None:
+                                # Deteksi nama channel pengirim
+                                ch_list = self.sock_to_channels.get(sock, [])
+                                ch_name = ch_list[0]["name"] if ch_list else "Siaran Audio"
+                                is_ip_phone = ("phone" in ch_name.lower()) or ("control" in ch_name.lower())
+
+                                cat = "darurat" if is_ip_phone else "biasa"
+                                title = ch_name if is_ip_phone else f"Siaran Masuk ({ch_name})"
+
+                                self.notify_toast(
+                                    f"IntanWave — {ch_name}",
+                                    f"Menerima panggilan siaran dari {addr[0]}"
+                                )
+                                self.set_status("STREAMING", cat, title)
+                                if not is_ip_phone:
+                                    threading.Thread(target=self._fetch_playback_info, daemon=True).start()
+
+                                vol = int(self.config.get("volume", 100))
+                                vol = max(0, min(100, vol))
+
+                                # Deteksi codec otomatis: pt=0 (PCMU/mulaw) vs pt=8/default (PCMA/alaw)
+                                codec_fmt = "mulaw" if pt == 0 else "alaw"
+
+                                cmd = [
+                                    get_ffplay_bin(),
+                                    "-nodisp",
+                                    "-autoexit",
+                                    "-loglevel", "quiet",
+                                    "-probesize", "32",
+                                    "-analyzeduration", "0",
+                                    "-fflags", "nobuffer",
+                                    "-flags", "low_delay",
+                                    "-volume", str(vol),
+                                    "-f", codec_fmt,
+                                    "-sample_rate", "8000",
+                                    "-ch_layout", "mono",
+                                    "-i", "-"
+                                ]
+                                self.player_proc = subprocess.Popen(
+                                    cmd,
+                                    stdin=subprocess.PIPE,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+                                )
+
+                            # Tulis audio payload ke stdin ffplay
+                            if self.player_proc and self.player_proc.stdin:
+                                try:
+                                    if self.player_proc.poll() is not None:
+                                        self._close_player()
+                                    else:
+                                        self.player_proc.stdin.write(payload)
+                                        self.player_proc.stdin.flush()
+                                except Exception:
                                     self._close_player()
-                                else:
-                                    self.player_proc.stdin.write(payload)
-                                    self.player_proc.stdin.flush()
-                            except Exception:
-                                self._close_player()
-
-            except socket.timeout:
-                # Cek apakah aliran paket berhenti > 1.2 detik
-                if self.status == "STREAMING" and (time.time() - self.last_packet_time > 1.2):
-                    self._close_player()
-                    self.set_status("STANDBY", "biasa", "")
 
             except Exception:
-                time.sleep(0.1)
+                time.sleep(0.05)
 
         self._close_player()
 

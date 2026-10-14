@@ -127,28 +127,28 @@ class AudioEngine:
             if target_endpoints and len(target_endpoints) > 0:
                 if len(target_endpoints) == 1:
                     rtp_args = [
+                        "-af", "aresample=8000:async=1,asetnsamples=n=160",
                         "-acodec", "pcm_alaw",
-                        "-ar", "8000",
                         "-ac", "1",
-                        "-f", "rtp", f"rtp://{target_endpoints[0]}"
+                        "-f", "rtp", f"rtp://{target_endpoints[0]}?pkt_size=172"
                     ]
                 else:
                     # FFmpeg tee muxer untuk multiple unicast outputs
-                    tee_outputs = "|".join([f"[select=a:f=rtp]rtp://{ep}" for ep in target_endpoints])
+                    tee_outputs = "|".join([f"[select=a:f=rtp]rtp://{ep}?pkt_size=172" for ep in target_endpoints])
                     rtp_args = [
+                        "-af", "aresample=8000:async=1,asetnsamples=n=160",
                         "-map", "0:a",
                         "-c:a", "pcm_alaw",
-                        "-ar", "8000",
                         "-ac", "1",
                         "-f", "tee", tee_outputs
                     ]
             else:
                 # Default global multicast
                 rtp_args = [
+                    "-af", "aresample=8000:async=1,asetnsamples=n=160",
                     "-acodec", "pcm_alaw",
-                    "-ar", "8000",
                     "-ac", "1",
-                    "-f", "rtp", f"rtp://{mc_ip}:{mc_port}"
+                    "-f", "rtp", f"rtp://{mc_ip}:{mc_port}?pkt_size=172"
                 ]
 
             rtp_cmd = [
@@ -195,12 +195,12 @@ class AudioEngine:
         if not chime_path.exists():
             raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
 
-        rtp_url = f"rtp://{ip}:{port}"
+        rtp_url = f"rtp://{ip}:{port}?pkt_size=172"
         cmd = [
             "ffmpeg", "-re", "-y",
             "-i", str(chime_path.resolve()),
+            "-af", "aresample=8000:async=1,asetnsamples=n=160",
             "-acodec", "pcm_alaw",
-            "-ar", "8000",
             "-ac", "1",
             "-f", "rtp",
             rtp_url

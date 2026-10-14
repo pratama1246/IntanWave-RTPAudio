@@ -209,6 +209,19 @@ class IntanWaveNodeWindow:
         self.entry_port.insert(0, str(self.receiver.multicast_port))
         self.entry_port.grid(row=1, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
+        ttk.Label(cfg_grid, text="IP Phone Multicast:").grid(row=2, column=0, sticky=tk.W, pady=3)
+        self.entry_secondary_ip = ttk.Entry(cfg_grid)
+        self.entry_secondary_ip.insert(0, self.receiver.secondary_channel_str)
+        self.entry_secondary_ip.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
+
+        lbl_hint = ttk.Label(
+            cfg_grid, 
+            text="*Opsional: channel kedua (misal: 239.255.0.2 atau 239.255.0.2:5006)", 
+            font=("Segoe UI", 7), 
+            foreground="#64748b"
+        )
+        lbl_hint.grid(row=3, column=1, sticky=tk.W, padx=(8, 0))
+
         # 4. Status Indikator Server (Live Heartbeat Badge)
         status_frame = ttk.Frame(main_frame)
         status_frame.pack(fill=tk.X, pady=(0, 8))
@@ -257,6 +270,7 @@ class IntanWaveNodeWindow:
         new_zone = self.entry_zone.get().strip()
         new_ip = self.entry_ip.get().strip()
         new_port = self.entry_port.get().strip()
+        new_sec = self.entry_secondary_ip.get().strip()
 
         if not new_server:
             messagebox.showwarning("Peringatan", "URL Server PA Audio tidak boleh kosong.", parent=self.root)
@@ -273,10 +287,11 @@ class IntanWaveNodeWindow:
 
         try:
             port_num = int(new_port)
-            self.receiver.save_config(new_server, new_name, new_zone, new_ip, port_num)
+            self.receiver.save_config(new_server, new_name, new_zone, new_ip, port_num, new_sec)
+            sec_msg = f"\nIP Phone: rtp://{new_sec}" if new_sec else ""
             messagebox.showinfo(
                 "Berhasil", 
-                f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}\nReceiver: rtp://{new_ip}:{port_num}",
+                f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}\nReceiver: rtp://{new_ip}:{port_num}{sec_msg}",
                 parent=self.root
             )
         except ValueError:

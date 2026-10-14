@@ -47,14 +47,15 @@ async def trigger_schedule_job(schedule_id: int):
         if tmode in ("group", "zone") and tgroup:
             with get_db() as conn:
                 sp_rows = conn.execute("SELECT id, ip_address, port, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
+                target_groups = [g.strip() for g in tgroup.replace("[","").replace("]","").replace('"','').split(",") if g.strip()]
                 matching_rows = []
                 for r in sp_rows:
                     grps = parse_groups(r["groups"] or r["zone"])
-                    if tgroup in grps or r["zone"] == tgroup:
+                    if any(tg.lower() in [x.lower() for x in grps] or (r["zone"] and r["zone"].lower() == tg.lower()) for tg in target_groups):
                         matching_rows.append(r)
                 if matching_rows:
                     target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in matching_rows]
-                    target_desc = f"Group {tgroup} ({len(target_endpoints)} Speaker)"
+                    target_desc = f"Group {', '.join(target_groups)} ({len(target_endpoints)} Speaker)"
         elif tmode == "speaker" and tspk_id:
             with get_db() as conn:
                 sp_row = conn.execute("SELECT ip_address, port, name FROM speakers WHERE id = ? AND enabled = 1 AND ip_address NOT LIKE 'pending-%'", (tspk_id,)).fetchone()
@@ -93,34 +94,56 @@ def reload_schedules():
             SELECT * FROM schedules WHERE enabled = 1
         """).fetchall()
 
+    total_jobs = 0
     for s in schedules:
-        job_id = f"schedule_{s['id']}"
-        time_parts = s["time_str"].split(":")
-        hour = int(time_parts[0]) if len(time_parts) > 0 else 0
-        minute = int(time_parts[1]) if len(time_parts) > 1 else 0
-
-        trigger = None
         stype = s["schedule_type"]
-
-        if stype == "daily":
-            trigger = CronTrigger(hour=hour, minute=minute, timezone=JAKARTA_TZ)
-        elif stype in ("weekdays", "custom", "days"):
-            dow = s["days_of_week"] if "days_of_week" in s.keys() and s["days_of_week"] else None
-            days = dow.strip() if dow and dow.strip() else ("mon-fri" if stype == "weekdays" else "*")
-            trigger = CronTrigger(day_of_week=days, hour=hour, minute=minute, timezone=JAKARTA_TZ)
-        elif stype == "interval":
+        
+        # Mode interval tidak memerlukan multi-jam
+        if stype == "interval":
             hours = s["interval_hours"] or 2
             trigger = IntervalTrigger(hours=hours, timezone=JAKARTA_TZ)
-        elif stype == "once":
-            trigger = CronTrigger(hour=hour, minute=minute, timezone=JAKARTA_TZ)
-
-        if trigger:
             scheduler.add_job(
                 trigger_schedule_job,
                 trigger=trigger,
                 args=[s["id"]],
-                id=job_id,
+                id=f"schedule_{s['id']}_interval",
                 replace_existing=True
             )
+            total_jobs += 1
+            continue
 
-    log_event("SCHEDULER_RELOADED", f"{len(schedules)} jadwal aktif dimuat ke scheduler.")
+        # Mendukung multi-time (misal: "08:00, 11:00, 15:00")
+        raw_times = [t.strip() for t in (s["time_str"] or "08:00").split(",") if t.strip()]
+        if not raw_times:
+            raw_times = ["08:00"]
+
+        for idx, t_str in enumerate(raw_times):
+            job_id = f"schedule_{s['id']}_{idx}"
+            time_parts = t_str.split(":")
+            try:
+                hour = int(time_parts[0]) if len(time_parts) > 0 else 0
+                minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+            except ValueError:
+                continue
+
+            trigger = None
+            if stype == "daily":
+                trigger = CronTrigger(hour=hour, minute=minute, timezone=JAKARTA_TZ)
+            elif stype in ("weekdays", "custom", "days"):
+                dow = s["days_of_week"] if "days_of_week" in s.keys() and s["days_of_week"] else None
+                days = dow.strip() if dow and dow.strip() else ("mon-fri" if stype == "weekdays" else "*")
+                trigger = CronTrigger(day_of_week=days, hour=hour, minute=minute, timezone=JAKARTA_TZ)
+            elif stype == "once":
+                trigger = CronTrigger(hour=hour, minute=minute, timezone=JAKARTA_TZ)
+
+            if trigger:
+                scheduler.add_job(
+                    trigger_schedule_job,
+                    trigger=trigger,
+                    args=[s["id"]],
+                    id=job_id,
+                    replace_existing=True
+                )
+                total_jobs += 1
+
+    log_event("SCHEDULER_RELOADED", f"{len(schedules)} jadwal aktif dimuat ({total_jobs} trigger waktu terdaftar).")

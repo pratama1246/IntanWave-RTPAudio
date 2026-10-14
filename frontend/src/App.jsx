@@ -236,11 +236,47 @@ export default function App() {
     time_str: '08:00',
     days_of_week: 'mon,tue,wed,thu,fri',
     target_mode: 'all',
+    target_group: '',
     target_zone: '',
     target_speaker_id: 0,
     target_multicast: true,
     target_local: true
   });
+  const [scheduleTimeInput, setScheduleTimeInput] = useState('08:00');
+
+  // Multi-Time Helpers for Schedule
+  const parseScheduleTimes = (timeStr) => {
+    if (!timeStr) return ['08:00'];
+    const parts = timeStr.split(',').map(t => t.trim()).filter(Boolean);
+    return parts.length > 0 ? parts : ['08:00'];
+  };
+
+  const handleAddTime = () => {
+    if (!scheduleTimeInput) return;
+    const current = parseScheduleTimes(newSchedule.time_str);
+    if (!current.includes(scheduleTimeInput)) {
+      const updated = [...current, scheduleTimeInput].sort();
+      setNewSchedule(prev => ({ ...prev, time_str: updated.join(', ') }));
+    }
+  };
+
+  const handleAddPresetTime = (presetTime) => {
+    const current = parseScheduleTimes(newSchedule.time_str);
+    if (!current.includes(presetTime)) {
+      const updated = [...current, presetTime].sort();
+      setNewSchedule(prev => ({ ...prev, time_str: updated.join(', ') }));
+    }
+  };
+
+  const handleRemoveTime = (timeToRemove) => {
+    const current = parseScheduleTimes(newSchedule.time_str);
+    if (current.length <= 1) {
+      alert('Jadwal harus memiliki minimal 1 jam siaran');
+      return;
+    }
+    const updated = current.filter(t => t !== timeToRemove);
+    setNewSchedule(prev => ({ ...prev, time_str: updated.join(', ') }));
+  };
 
   const fileInputRef = useRef(null);
 
@@ -528,10 +564,6 @@ export default function App() {
     const candidates = [];
 
     for (const s of active) {
-      const parts = (s.time_str || '00:00').split(':');
-      const h = parseInt(parts[0], 10) || 0;
-      const m = parseInt(parts[1], 10) || 0;
-
       // Tentukan hari apa saja jadwal ini diizinkan berjalan
       let allowedDays = [];
       const stype = s.schedule_type || 'daily';
@@ -551,38 +583,48 @@ export default function App() {
         }
       }
 
-      // Cari waktu eksekusi terdekat (hari ini s.d. 7 hari ke depan)
-      for (let offset = 0; offset <= 7; offset++) {
-        const candidateDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, h, m, 0, 0);
-        const dayCode = DAY_CODES[candidateDate.getDay()];
+      // Dukung multi-waktu per jadwal (misal: "08:00, 11:00, 15:00")
+      const timesList = parseScheduleTimes(s.time_str);
 
-        if (allowedDays.includes(dayCode) && candidateDate.getTime() > now.getTime()) {
-          const diffMs = candidateDate.getTime() - now.getTime();
-          const diffMinutes = Math.floor(diffMs / 60000);
+      for (const tStr of timesList) {
+        const parts = tStr.split(':');
+        const h = parseInt(parts[0], 10) || 0;
+        const m = parseInt(parts[1], 10) || 0;
 
-          let dayLabel = 'Hari ini';
-          if (offset === 1) {
-            dayLabel = 'Besok';
-          } else if (offset > 1) {
-            dayLabel = DAY_LABELS_INDO[dayCode] || dayCode;
+        // Cari waktu eksekusi terdekat (hari ini s.d. 7 hari ke depan)
+        for (let offset = 0; offset <= 7; offset++) {
+          const candidateDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, h, m, 0, 0);
+          const dayCode = DAY_CODES[candidateDate.getDay()];
+
+          if (allowedDays.includes(dayCode) && candidateDate.getTime() > now.getTime()) {
+            const diffMs = candidateDate.getTime() - now.getTime();
+            const diffMinutes = Math.floor(diffMs / 60000);
+
+            let dayLabel = 'Hari ini';
+            if (offset === 1) {
+              dayLabel = 'Besok';
+            } else if (offset > 1) {
+              dayLabel = DAY_LABELS_INDO[dayCode] || dayCode;
+            }
+
+            const days = Math.floor(diffMinutes / (24 * 60));
+            const hours = Math.floor((diffMinutes % (24 * 60)) / 60);
+            const mins = diffMinutes % 60;
+            const countdown = days > 0
+              ? `${days}h ${hours}j ${mins}m`
+              : `${hours}j ${mins}m`;
+
+            candidates.push({
+              ...s,
+              time_str: tStr, // Jam spesifik yang akan aktif
+              diff: diffMinutes,
+              nextDate: candidateDate,
+              dayLabel,
+              countdown,
+              isTomorrow: offset === 1
+            });
+            break; // Temukan hari terdekat untuk jam spesifik ini
           }
-
-          const days = Math.floor(diffMinutes / (24 * 60));
-          const hours = Math.floor((diffMinutes % (24 * 60)) / 60);
-          const mins = diffMinutes % 60;
-          const countdown = days > 0
-            ? `${days}h ${hours}j ${mins}m`
-            : `${hours}j ${mins}m`;
-
-          candidates.push({
-            ...s,
-            diff: diffMinutes,
-            nextDate: candidateDate,
-            dayLabel,
-            countdown,
-            isTomorrow: offset === 1
-          });
-          break; // Temukan jadwal terdekat untuk item ini
         }
       }
     }
@@ -863,17 +905,20 @@ export default function App() {
       time_str: '08:00',
       days_of_week: 'mon,tue,wed,thu,fri',
       target_mode: 'all',
+      target_group: '',
       target_zone: '',
       target_speaker_id: 0,
       target_multicast: true,
       target_local: true
     });
+    setScheduleTimeInput('08:00');
     setShowAddSchedule(true);
   };
 
   // Edit Schedule
   const handleOpenEditSchedule = (schedule) => {
     setEditingScheduleId(schedule.id);
+    const existingTimes = parseScheduleTimes(schedule.time_str);
     setNewSchedule({
       name: schedule.name,
       audio_file_id: schedule.audio_file_id || (audioList[0]?.id || ''),
@@ -881,17 +926,20 @@ export default function App() {
       time_str: schedule.time_str || '08:00',
       days_of_week: schedule.days_of_week || 'mon,tue,wed,thu,fri',
       target_mode: schedule.target_mode || 'all',
-      target_zone: schedule.target_zone || '',
+      target_group: schedule.target_group || schedule.target_zone || '',
+      target_zone: schedule.target_group || schedule.target_zone || '',
       target_speaker_id: schedule.target_speaker_id || 0,
       target_multicast: Boolean(schedule.target_multicast),
       target_local: Boolean(schedule.target_local)
     });
+    setScheduleTimeInput(existingTimes[0] || '08:00');
     setShowAddSchedule(true);
   };
 
   // Duplicate Schedule
   const handleDuplicateSchedule = (schedule) => {
     setEditingScheduleId(null);
+    const existingTimes = parseScheduleTimes(schedule.time_str);
     setNewSchedule({
       name: schedule.name + ' Salinan',
       audio_file_id: schedule.audio_file_id || (audioList[0]?.id || ''),
@@ -899,11 +947,13 @@ export default function App() {
       time_str: schedule.time_str || '08:00',
       days_of_week: schedule.days_of_week || 'mon,tue,wed,thu,fri',
       target_mode: schedule.target_mode || 'all',
-      target_zone: schedule.target_zone || '',
+      target_group: schedule.target_group || schedule.target_zone || '',
+      target_zone: schedule.target_group || schedule.target_zone || '',
       target_speaker_id: schedule.target_speaker_id || 0,
       target_multicast: Boolean(schedule.target_multicast),
       target_local: Boolean(schedule.target_local)
     });
+    setScheduleTimeInput(existingTimes[0] || '08:00');
     setShowAddSchedule(true);
   };
 
@@ -1526,7 +1576,7 @@ export default function App() {
                     <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
                       <tr>
                         <th className="py-3 px-4 w-16 text-center">Aktif</th>
-                        <th className="py-3 px-4 w-28">Waktu</th>
+                        <th className="py-3 px-4 min-w-[130px]">Waktu Siar</th>
                         <th className="py-3 px-4">Nama Jadwal & Suara</th>
                         <th className="py-3 px-4 w-40">Pengulangan</th>
                         <th className="py-3 px-4 text-right pr-6 w-44">Aksi</th>
@@ -1559,13 +1609,22 @@ export default function App() {
                               </button>
                             </td>
 
-                            {/* Digital Clock */}
-                            <td className="py-3 px-4 whitespace-nowrap">
-                              <span className={`text-xl font-semibold tracking-tight ${
-                                s.enabled ? 'text-slate-900' : 'text-slate-400'
-                              }`}>
-                                {s.time_str}
-                              </span>
+                            {/* Digital Clock / Multi-Times */}
+                            <td className="py-3 px-4">
+                              <div className="flex flex-wrap items-center gap-1.5 max-w-[220px]">
+                                {parseScheduleTimes(s.time_str).map((t, idx) => (
+                                  <span 
+                                    key={idx}
+                                    className={`px-2 py-0.5 rounded-md font-mono text-xs font-semibold tracking-tight border ${
+                                      s.enabled 
+                                        ? 'bg-blue-50/90 text-blue-700 border-blue-200/70 shadow-2xs' 
+                                        : 'bg-slate-100 text-slate-400 border-slate-200/50'
+                                    }`}
+                                  >
+                                    {t}
+                                  </span>
+                                ))}
+                              </div>
                             </td>
 
                             {/* Nama Jadwal & Audio & Target */}
@@ -2411,38 +2470,115 @@ export default function App() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Waktu Siar</label>
-                  <input 
-                    type="time" 
-                    required
-                    value={newSchedule.time_str}
-                    onChange={e => setNewSchedule({ ...newSchedule, time_str: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
-                  />
+              {/* Multi-Time Picker */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Waktu Siar (Bisa Banyak Jam)</span>
+                  </label>
+                  <span className="text-[11px] font-medium text-slate-400">
+                    {parseScheduleTimes(newSchedule.time_str).length} jam dipilih
+                  </span>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Pengulangan</label>
-                  <CustomDropdown
-                    value={newSchedule.schedule_type}
-                    onChange={val => {
-                      if (val === 'daily') setSchedulePreset('daily');
-                      else if (val === 'weekdays') setSchedulePreset('weekdays');
-                      else setNewSchedule({ ...newSchedule, schedule_type: val });
-                    }}
-                    options={[
-                      { value: 'daily', label: 'Setiap hari (Sen - Min)' },
-                      { value: 'weekdays', label: 'Senin sampai Jumat' },
-                      { value: 'custom', label: 'Pilih hari tertentu' },
-                      { value: 'once', label: 'Sekali jalan' }
-                    ]}
-                    variant="light"
-                    className="w-full"
-                    buttonClassName="w-full bg-white justify-between"
-                  />
+                {/* List of active time badges */}
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 mb-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {parseScheduleTimes(newSchedule.time_str).map((t, idx) => (
+                      <span 
+                        key={idx}
+                        className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-white border border-blue-200/80 text-blue-700 font-mono text-xs font-semibold shadow-2xs"
+                      >
+                        <span>{t}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTime(t)}
+                          className="p-0.5 rounded-md hover:bg-red-50 hover:text-red-600 text-slate-400 cursor-pointer transition-colors"
+                          title="Hapus jam ini"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                    {parseScheduleTimes(newSchedule.time_str).length === 0 && (
+                      <span className="text-xs text-amber-600 italic">Pilih minimal 1 jam siaran</span>
+                    )}
+                  </div>
                 </div>
+
+                {/* Input tambah jam & preset */}
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  <div className="flex items-center gap-1.5">
+                    <input 
+                      type="time" 
+                      value={scheduleTimeInput}
+                      onChange={e => setScheduleTimeInput(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-hidden bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddTime}
+                      className="px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium cursor-pointer transition-colors flex items-center gap-1 shadow-2xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Jam</span>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1 text-[11px] text-slate-500 sm:ml-auto">
+                    <span className="text-slate-400">Preset:</span>
+                    <button 
+                      type="button" 
+                      onClick={() => handleAddPresetTime('08:00')} 
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 cursor-pointer transition-colors"
+                    >
+                      08:00
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => handleAddPresetTime('11:45')} 
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 cursor-pointer transition-colors"
+                    >
+                      11:45
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => handleAddPresetTime('15:00')} 
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 cursor-pointer transition-colors"
+                    >
+                      15:00
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => handleAddPresetTime('17:00')} 
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 cursor-pointer transition-colors"
+                    >
+                      17:00
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pengulangan */}
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Pengulangan Hari</label>
+                <CustomDropdown
+                  value={newSchedule.schedule_type}
+                  onChange={val => {
+                    if (val === 'daily') setSchedulePreset('daily');
+                    else if (val === 'weekdays') setSchedulePreset('weekdays');
+                    else setNewSchedule({ ...newSchedule, schedule_type: val });
+                  }}
+                  options={[
+                    { value: 'daily', label: 'Setiap hari (Sen - Min)' },
+                    { value: 'weekdays', label: 'Senin sampai Jumat' },
+                    { value: 'custom', label: 'Pilih hari tertentu' },
+                    { value: 'once', label: 'Sekali jalan' }
+                  ]}
+                  variant="light"
+                  className="w-full"
+                  buttonClassName="w-full bg-white justify-between"
+                />
               </div>
 
               {/* Day Selection Pills */}
