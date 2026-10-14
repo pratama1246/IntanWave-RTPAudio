@@ -151,7 +151,8 @@ function MultiTargetSelector({
   size = 'sm',
   className = '',
   buttonClassName = '',
-  placeholder = 'Pilih Target Siaran'
+  placeholder = 'Pilih Target Siaran',
+  align = 'right' // 'right' (buka ke kiri) | 'left' (buka ke kanan)
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [speakerSearch, setSpeakerSearch] = useState('');
@@ -355,7 +356,7 @@ function MultiTargetSelector({
 
       {isOpen && (
         <div
-          className={`absolute left-0 top-full mt-1.5 w-84 sm:w-96 max-w-[95vw] rounded-2xl p-3.5 z-50 shadow-2xl border animate-in fade-in zoom-in-95 duration-100 ${
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1.5 w-84 sm:w-96 max-w-[92vw] rounded-2xl p-3.5 z-50 shadow-2xl border animate-in fade-in zoom-in-95 duration-100 ${
             isDark
               ? 'bg-slate-900 border-slate-700/80 text-slate-200 ring-1 ring-white/10'
               : 'bg-white border-slate-200 text-slate-700 shadow-xl'
@@ -2228,6 +2229,7 @@ export default function App() {
                   groupsList={groupsList}
                   variant={isPlaying || hasEmergency ? 'dark' : 'light'}
                   size="sm"
+                  align="right"
                   buttonClassName="min-w-[150px] max-w-[220px] sm:max-w-[280px]"
                 />
               </>
@@ -3434,6 +3436,7 @@ export default function App() {
                   groupsList={groupsList}
                   variant="light"
                   size="md"
+                  align="left"
                   buttonClassName="w-full bg-white justify-between"
                   className="w-full"
                 />
