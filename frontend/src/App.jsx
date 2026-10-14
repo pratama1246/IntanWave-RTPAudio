@@ -729,6 +729,9 @@ export default function App() {
 
   // Server Time Synchronization & Display (Rock-solid, zero wobble, no font-mono)
   const serverOffsetRef = useRef(0);
+  const [serverHours, setServerHours] = useState('12');
+  const [serverMinutes, setServerMinutes] = useState('00');
+  const [serverSeconds, setServerSeconds] = useState('00');
   const [serverTimeDisplay, setServerTimeDisplay] = useState('');
   const [serverDateDisplay, setServerDateDisplay] = useState('');
 
@@ -762,6 +765,9 @@ export default function App() {
       const hours = String(serverNow.getHours()).padStart(2, '0');
       const minutes = String(serverNow.getMinutes()).padStart(2, '0');
       const seconds = String(serverNow.getSeconds()).padStart(2, '0');
+      setServerHours(hours);
+      setServerMinutes(minutes);
+      setServerSeconds(seconds);
       setServerTimeDisplay(`${hours}:${minutes}:${seconds}`);
       setCurrentTime(`${hours}:${minutes}:${seconds} WIB`);
 
@@ -1980,52 +1986,38 @@ export default function App() {
       {/* 3. MAIN WORKSPACE (ALARM-FIRST CONSOLE) */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 flex-1 w-full space-y-4">
         
-        {/* MASTER SERVER CLOCK (SINKRON SERVER, BESAR, SANS PROPORSIONAL, ZERO-JITTER TABULAR) */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="p-3 rounded-2xl bg-blue-50 border border-blue-100/80 text-blue-600 shrink-0">
-              <Clock className="w-8 h-8" />
+        {/* WAKTU SERVER */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-4 shadow-2xs flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-slate-100 text-slate-600 shrink-0">
+              <Clock className="w-5 h-5 text-slate-500" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                  Waktu Server Master (Pelindo Tanjung Intan)
+              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span>Waktu server</span>
+              </div>
+              <div className="flex items-baseline gap-2 mt-0.5">
+                <div className="flex items-center text-2xl sm:text-3xl font-semibold text-slate-800 select-none">
+                  <span className="inline-block w-[1.2ch] text-center">{serverHours[0]}</span>
+                  <span className="inline-block w-[1.2ch] text-center">{serverHours[1]}</span>
+                  <span className="inline-block w-[0.8ch] text-center text-slate-400">:</span>
+                  <span className="inline-block w-[1.2ch] text-center">{serverMinutes[0]}</span>
+                  <span className="inline-block w-[1.2ch] text-center">{serverMinutes[1]}</span>
+                  <span className="inline-block w-[0.8ch] text-center text-slate-400">:</span>
+                  <span className="inline-block w-[1.2ch] text-center text-slate-500">{serverSeconds[0]}</span>
+                  <span className="inline-block w-[1.2ch] text-center text-slate-500">{serverSeconds[1]}</span>
+                </div>
+                <span className="text-xs font-medium text-slate-500">
+                  WIB
                 </span>
               </div>
-              <div className="flex items-baseline gap-2.5 mt-0.5">
-                <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight tabular-nums select-none">
-                  {serverTimeDisplay || '12:00:00'}
-                </span>
-                <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60">
-                  WIB (UTC+7)
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {serverDateDisplay} • Waktu sinkron otomatis dengan jadwal siaran
-              </p>
             </div>
           </div>
 
-          {/* Info Siaran Terjadwal Berikutnya */}
-          {nextSchedule && (
-            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200/70 sm:max-w-xs w-full sm:w-auto">
-              <div className="p-2 rounded-lg bg-blue-100/70 text-blue-700 shrink-0">
-                <Bell className="w-4 h-4 animate-bounce" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <span className="text-[10px] font-medium text-slate-400 block truncate">
-                  Siaran Terjadwal Berikutnya:
-                </span>
-                <span className="text-xs font-bold text-slate-800 truncate block">
-                  {nextSchedule.name} • {nextSchedule.time_str} WIB
-                </span>
-                <span className="text-[10px] text-blue-600 font-semibold block truncate">
-                  {nextSchedule.countdown}
-                </span>
-              </div>
-            </div>
-          )}
+          <div className="text-xs text-slate-400 text-right hidden sm:block">
+            <span>{serverDateDisplay}</span>
+          </div>
         </div>
 
         {/* TAB NAVIGATION & PRIMARY ACTIONS */}
