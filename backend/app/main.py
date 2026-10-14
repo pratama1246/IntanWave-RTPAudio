@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import shutil
+import threading
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
@@ -25,7 +26,7 @@ from app.database import (
 )
 from app.audio_engine import audio_engine
 from app.stream_hub import stream_hub
-from app.scheduler import scheduler, reload_schedules
+from app.scheduler import scheduler, reload_schedules, trigger_schedule_job
 from app.ping_service import ping_ip, scan_all_speakers_parallel, ping_monitor
 
 FRONTEND_DIST = Path(os.getenv("FRONTEND_DIST", str(BASE_DIR.parent / "frontend" / "dist")))
@@ -843,6 +844,18 @@ def delete_schedule(schedule_id: int):
     reload_schedules()
     log_event("SCHEDULE_DELETED", f"Menghapus jadwal id {schedule_id}")
     return {"message": "Jadwal berhasil dihapus"}
+
+@app.post("/api/schedules/{schedule_id}/trigger")
+def trigger_schedule_manually(schedule_id: int):
+    """Memicu jadwal berbunyi seketika sesuai target spesifik yang tersimpan di jadwal tersebut."""
+    with get_db() as conn:
+        row = conn.execute("SELECT id, name FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Jadwal tidak ditemukan")
+
+    threading.Thread(target=trigger_schedule_job, args=[schedule_id], daemon=True).start()
+    log_event("SCHEDULE_MANUAL_TRIGGER", f"Memicu siaran jadwal secara manual: '{row['name']}'")
+    return {"message": f"Jadwal '{row['name']}' sedang disiarkan sesuai targetnya"}
 
 # --- HEALTH, SETTINGS & LOGS ---
 @app.get("/api/health")

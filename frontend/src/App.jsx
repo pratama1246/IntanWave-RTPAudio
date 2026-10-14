@@ -622,6 +622,7 @@ export default function App() {
   const [testingSpeakerId, setTestingSpeakerId] = useState(null);
   const [pingingSpeakerId, setPingingSpeakerId] = useState(null);
   const [copiedSpeakerId, setCopiedSpeakerId] = useState(null);
+  const [triggeringScheduleId, setTriggeringScheduleId] = useState(null);
 
   // Modals & Navigation
   const [activeMainTab, setActiveMainTab] = useState('schedules'); // 'schedules' | 'audio'
@@ -1210,6 +1211,26 @@ export default function App() {
       fetchData();
     } catch (err) {
       alert('Gagal menghentikan siaran: ' + err);
+    }
+  };
+
+  // Trigger Schedule Manually according to its own target
+  const handleTriggerSchedule = async (schedule) => {
+    handleStopBrowserPreview();
+    setTriggeringScheduleId(schedule.id);
+    try {
+      const res = await fetch(`/api/schedules/${schedule.id}/trigger`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        alert('Gagal menyiarkan jadwal: ' + (errData.detail || res.statusText || 'Server Error'));
+      }
+      fetchData();
+    } catch (err) {
+      alert('Gagal menyiarkan jadwal: ' + err);
+    } finally {
+      setTimeout(() => setTriggeringScheduleId(null), 2500);
     }
   };
 
@@ -2268,11 +2289,16 @@ export default function App() {
                                   <Headphones className="w-3.5 h-3.5" />
                                 </button>
 
-                                {/* Putar ke Speaker Luar */}
+                                {/* Tes Bunyikan Jadwal Ini (Sesuai Target Jadwal) */}
                                 <button 
-                                  onClick={() => handlePlayToSpeakers(s.audio_file_id)}
-                                  title="Siarkan langsung ke speaker fisik luar"
-                                  className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                                  onClick={() => handleTriggerSchedule(s)}
+                                  disabled={triggeringScheduleId === s.id}
+                                  title={`Uji siarkan jadwal "${s.name}" sekarang (ke target: ${s.target_mode === 'all' || !s.target_mode ? 'Semua Speaker' : (s.target_group || s.target_zone || s.target_speakers || 'Target Khusus')})`}
+                                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                    triggeringScheduleId === s.id
+                                      ? 'bg-blue-100 text-blue-700 animate-pulse'
+                                      : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
+                                  }`}
                                 >
                                   <Play className="w-3.5 h-3.5 fill-current" />
                                 </button>
