@@ -853,7 +853,7 @@ def trigger_schedule_manually(schedule_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Jadwal tidak ditemukan")
 
-    threading.Thread(target=trigger_schedule_job, args=[schedule_id], daemon=True).start()
+    threading.Thread(target=trigger_schedule_job, args=[schedule_id, True], daemon=True).start()
     log_event("SCHEDULE_MANUAL_TRIGGER", f"Memicu siaran jadwal secara manual: '{row['name']}'")
     return {"message": f"Jadwal '{row['name']}' sedang disiarkan sesuai targetnya"}
 

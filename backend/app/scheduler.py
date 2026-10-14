@@ -12,15 +12,18 @@ logger = logging.getLogger("pa_scheduler")
 JAKARTA_TZ = zoneinfo.ZoneInfo("Asia/Jakarta")
 scheduler = AsyncIOScheduler(timezone=JAKARTA_TZ)
 
-async def trigger_schedule_job(schedule_id: int):
-    """Fungsi yang dipanggil saat alarm scheduler jatuh tempo."""
+def trigger_schedule_job(schedule_id: int, force: bool = False):
+    """Fungsi yang dipanggil saat alarm scheduler jatuh tempo atau dipicu manual."""
     with get_db() as conn:
-        row = conn.execute("""
+        query = """
             SELECT s.*, a.file_path, a.display_name, a.filename, a.category 
             FROM schedules s
             JOIN audio_files a ON s.audio_file_id = a.id
-            WHERE s.id = ? AND s.enabled = 1
-        """, (schedule_id,)).fetchone()
+            WHERE s.id = ?
+        """
+        if not force:
+            query += " AND s.enabled = 1"
+        row = conn.execute(query, (schedule_id,)).fetchone()
 
     if not row:
         return
@@ -35,7 +38,7 @@ async def trigger_schedule_job(schedule_id: int):
             log_event("SCHEDULE_ERROR", f"Berkas fisik '{row['filename']}' tidak ditemukan di storage", level="ERROR")
             return
 
-    log_event("SCHEDULE_TRIGGERED", f"Memutar jadwal otomatis: '{row['name']}' ({row['display_name']})")
+    log_event("SCHEDULE_TRIGGERED", f"Memutar jadwal {'manual' if force else 'otomatis'}: '{row['name']}' ({row['display_name']})")
     try:
         tmode = row["target_mode"] if "target_mode" in row.keys() else "all"
         tgroup = row["target_group"] if "target_group" in row.keys() else (row["target_zone"] if "target_zone" in row.keys() else "")
@@ -88,7 +91,8 @@ async def trigger_schedule_job(schedule_id: int):
                         desc_parts.append(f"{len(target_speaker_ids)} Speaker")
                 target_desc = " + ".join(desc_parts) + f" ({len(target_endpoints)} Speaker)"
             else:
-                is_all_mode = True
+                log_event("SCHEDULE_WARNING", f"Target speaker/group untuk jadwal '{row['name']}' tidak ditemukan atau sedang offline. Siaran dibatalkan.")
+                return
 
         if is_all_mode:
             with get_db() as conn:
