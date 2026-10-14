@@ -1612,17 +1612,28 @@ export default function App() {
                             {/* Digital Clock / Multi-Times */}
                             <td className="py-3 px-4">
                               <div className="flex flex-wrap items-center gap-1.5 max-w-[220px]">
-                                {parseScheduleTimes(s.time_str).map((t, idx) => (
-                                  <span 
-                                    key={idx}
-                                    className={`px-2 py-0.5 rounded-md font-mono text-xs font-semibold tracking-tight border ${
-                                      s.enabled 
-                                        ? 'bg-blue-50/90 text-blue-700 border-blue-200/70 shadow-2xs' 
-                                        : 'bg-slate-100 text-slate-400 border-slate-200/50'
-                                    }`}
-                                  >
-                                    {t}
-                                  </span>
+                                {parseScheduleTimes(s.time_str).map((t, idx, arr) => (
+                                  arr.length === 1 ? (
+                                    <span 
+                                      key={idx}
+                                      className={`text-xl font-semibold tracking-tight ${
+                                        s.enabled ? 'text-slate-900' : 'text-slate-400'
+                                      }`}
+                                    >
+                                      {t}
+                                    </span>
+                                  ) : (
+                                    <span 
+                                      key={idx}
+                                      className={`px-2 py-0.5 rounded-md text-xs font-semibold tracking-normal border ${
+                                        s.enabled 
+                                          ? 'bg-blue-50/90 text-blue-700 border-blue-200/70 shadow-2xs' 
+                                          : 'bg-slate-100 text-slate-400 border-slate-200/50'
+                                      }`}
+                                    >
+                                      {t}
+                                    </span>
+                                  )
                                 ))}
                               </div>
                             </td>
@@ -2488,7 +2499,7 @@ export default function App() {
                     {parseScheduleTimes(newSchedule.time_str).map((t, idx) => (
                       <span 
                         key={idx}
-                        className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-white border border-blue-200/80 text-blue-700 font-mono text-xs font-semibold shadow-2xs"
+                        className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-white border border-blue-200/80 text-blue-700 text-xs font-semibold shadow-2xs"
                       >
                         <span>{t}</span>
                         <button
@@ -2779,7 +2790,7 @@ export default function App() {
 
               <div className="pt-1 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
                 <span>Nama berkas fisik:</span>
-                <span className="font-mono text-slate-700">{categoryChangeTarget.audio.filename}</span>
+                <span className="font-medium text-slate-700">{categoryChangeTarget.audio.filename}</span>
               </div>
             </div>
 
