@@ -3152,7 +3152,7 @@ export default function App() {
 
             <div className="mt-3 text-[11px] bg-sky-50/70 text-sky-800 border border-sky-200/60 p-2.5 rounded-xl flex items-center gap-2">
               <Headphones className="w-4 h-4 shrink-0 text-sky-600" />
-              <span>Ingin mendengar sendiri dulu tanpa siaran ke luar? Gunakan ikon <strong>Headphone (🎧)</strong> di baris tabel.</span>
+              <span>Ingin mendengar sendiri dulu tanpa siaran ke luar? Gunakan tombol <strong>Headphone</strong> di baris tabel.</span>
             </div>
 
             <div className="mt-5 flex items-center justify-end gap-2">
