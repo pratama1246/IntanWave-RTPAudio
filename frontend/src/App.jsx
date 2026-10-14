@@ -1711,13 +1711,31 @@ export default function App() {
       });
       if (res.ok) {
         setCategoryChangeTarget(null);
-        fetchData();
+        await fetchData();
       } else {
         const err = await res.json().catch(() => ({}));
         alert(err.detail || 'Gagal memperbarui kategori audio');
       }
     } catch (err) {
       alert('Gagal menghubungi server');
+    }
+  };
+
+  const handleCycleCategory = async (audio, e) => {
+    if (e) e.stopPropagation();
+    const currentCat = audio.category || 'biasa';
+    const nextCat = currentCat === 'biasa' ? 'safety' : currentCat === 'safety' ? 'darurat' : 'biasa';
+    try {
+      const res = await fetch(`/api/audio/${audio.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: nextCat })
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Gagal mengubah prioritas audio:', err);
     }
   };
 
@@ -2697,22 +2715,29 @@ export default function App() {
 
                             {/* Prioritas / Kategori */}
                             <td className="py-3 px-4 whitespace-nowrap">
-                              {isDarurat ? (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-100/80 text-rose-700 border border-rose-200 shadow-2xs">
-                                  <Siren className="w-3.5 h-3.5 text-rose-600 animate-pulse" />
-                                  <span>Darurat</span>
-                                </span>
-                              ) : isSafety ? (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-100/80 text-amber-800 border border-amber-200 shadow-2xs">
-                                  <HardHat className="w-3.5 h-3.5 text-amber-600" />
-                                  <span>K3 & Safety</span>
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                                  <Volume2 className="w-3.5 h-3.5 text-slate-400" />
-                                  <span>Rutin</span>
-                                </span>
-                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => handleCycleCategory(a, e)}
+                                className="cursor-pointer transition-transform active:scale-95 text-left group/badge"
+                                title="Klik untuk beralih prioritas: Rutin → K3 & Safety → Darurat"
+                              >
+                                {isDarurat ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-100/80 hover:bg-rose-100 text-rose-700 border border-rose-200 shadow-2xs group-hover/badge:ring-1 group-hover/badge:ring-rose-300">
+                                    <Siren className="w-3.5 h-3.5 text-rose-600 animate-pulse" />
+                                    <span>Darurat</span>
+                                  </span>
+                                ) : isSafety ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-100/80 hover:bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs group-hover/badge:ring-1 group-hover/badge:ring-amber-300">
+                                    <HardHat className="w-3.5 h-3.5 text-amber-600" />
+                                    <span>K3 & Safety</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 group-hover/badge:ring-1 group-hover/badge:ring-slate-300">
+                                    <Volume2 className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>Rutin</span>
+                                  </span>
+                                )}
+                              </button>
                             </td>
 
                             <td className="py-3 px-4 min-w-0">

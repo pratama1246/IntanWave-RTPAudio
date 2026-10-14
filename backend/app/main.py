@@ -142,7 +142,7 @@ def sync_audio_files_to_db():
                 if not existing:
                     name = f.stem.replace("_", " ").title()
                     lname = f.name.lower()
-                    cat = "darurat" if any(k in lname for k in ["siren", "sirine", "ews", "emergency", "bahaya", "evakuasi"]) else "biasa"
+                    cat = "darurat" if any(k in lname for k in ["siren", "sirine", "ews", "emergency", "bahaya", "evakuasi"]) else "safety" if any(k in lname for k in ["safety", "k3", "briefing", "apd"]) else "biasa"
                     conn.execute("""
                         INSERT INTO audio_files (filename, display_name, file_path, format, duration, size, category)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -195,7 +195,9 @@ async def upload_audio(
     disp_name = display_name if display_name else Path(file.filename).stem.replace("_", " ").title()
     size = save_path.stat().st_size
     cat = (category or "biasa").strip().lower()
-    if cat not in ("biasa", "darurat"):
+    if cat in ("k3", "safety"):
+        cat = "safety"
+    elif cat not in ("biasa", "darurat", "safety"):
         cat = "biasa"
 
     with get_db() as conn:
@@ -217,9 +219,12 @@ def update_audio_info(audio_id: int, req: AudioUpdateRequest):
         
         updates = []
         params = []
+        cat = None
         if req.category is not None:
             cat = req.category.strip().lower()
-            if cat in ("biasa", "darurat"):
+            if cat in ("k3", "safety"):
+                cat = "safety"
+            if cat in ("biasa", "darurat", "safety"):
                 updates.append("category = ?")
                 params.append(cat)
         if req.display_name is not None and req.display_name.strip():
@@ -230,7 +235,7 @@ def update_audio_info(audio_id: int, req: AudioUpdateRequest):
             params.append(audio_id)
             conn.execute(f"UPDATE audio_files SET {', '.join(updates)} WHERE id = ?", params)
             conn.commit()
-            log_event("AUDIO_UPDATED", f"Memperbarui audio ID {audio_id}: {req.category or ''}")
+            log_event("AUDIO_UPDATED", f"Memperbarui audio ID {audio_id}: [{cat.upper() if cat else row['category'].upper()}] {req.display_name or row['display_name']}")
             
     return {"message": "Audio berhasil diperbarui"}
 
