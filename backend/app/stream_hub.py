@@ -35,34 +35,48 @@ class StreamHub:
             return [nid for nid, _, _ in self._subs.values()]
 
     # --- Sisi engine (dipanggil dari thread biasa) ---
-    def begin(self, all_nodes: bool, nodes: Optional[Set[str]] = None):
+    def begin(self, all_nodes: bool = False, nodes: Optional[Set[str]] = None):
         with self._lock:
-            self._target_all = bool(all_nodes)
-            self._target_nodes = set(nodes or [])
-            self._active = True
-            subs = list(self._subs.values())
+            if all_nodes:
+                subs = [(loop, q) for _, loop, q in self._subs.values()]
+            elif nodes:
+                target_set = set(nodes)
+                subs = [
+                    (loop, q) for nid, loop, q in self._subs.values()
+                    if nid in target_set
+                ]
+            else:
+                subs = []
         for _, loop, q in subs:
             self._call(loop, self._flush, q)
 
-    def end(self):
+    def end(self, all_nodes: bool = False, nodes: Optional[Set[str]] = None):
         with self._lock:
-            if not self._active:
-                return
-            self._active = False
-            self._target_all = False
-            self._target_nodes = set()
-            subs = list(self._subs.values())
+            if all_nodes or nodes is None:
+                subs = [(loop, q) for _, loop, q in self._subs.values()]
+            elif nodes:
+                target_set = set(nodes)
+                subs = [
+                    (loop, q) for nid, loop, q in self._subs.values()
+                    if nid in target_set
+                ]
+            else:
+                subs = []
         for _, loop, q in subs:
             self._call(loop, self._end_sub, q)
 
-    def publish(self, chunk: bytes):
+    def publish(self, chunk: bytes, all_nodes: bool = False, nodes: Optional[Set[str]] = None):
         with self._lock:
-            if not self._active:
-                return
-            targets = [
-                (loop, q) for nid, loop, q in self._subs.values()
-                if self._target_all or nid in self._target_nodes
-            ]
+            if all_nodes:
+                targets = [(loop, q) for _, loop, q in self._subs.values()]
+            elif nodes:
+                target_set = set(nodes)
+                targets = [
+                    (loop, q) for nid, loop, q in self._subs.values()
+                    if nid in target_set
+                ]
+            else:
+                targets = []
         for loop, q in targets:
             self._call(loop, self._put, q, chunk)
 

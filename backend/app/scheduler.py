@@ -112,7 +112,8 @@ def trigger_schedule_job(schedule_id: int, force: bool = False):
             enable_local=bool(row["target_local"]),
             target_endpoints=target_endpoints,
             target_desc=target_desc,
-            category=cat
+            category=cat,
+            is_manual=force
         )
     except Exception as e:
         log_event("SCHEDULE_ERROR", f"Gagal mengeksekusi jadwal '{row['name']}': {e}", level="ERROR")

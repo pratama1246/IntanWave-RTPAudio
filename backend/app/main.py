@@ -378,7 +378,8 @@ def play_audio(req: PlayRequest):
             enable_local=req.enable_local,
             target_endpoints=target_endpoints,
             target_desc=target_desc,
-            category=cat
+            category=cat,
+            is_manual=True
         )
         return {"message": "Siaran dimulai", "status": audio_engine.get_status()}
     except Exception as e:
@@ -392,6 +393,28 @@ def stop_audio():
 @app.get("/api/playback")
 def get_playback_status():
     return audio_engine.get_status()
+
+@app.get("/api/playback/sessions")
+def get_playback_sessions():
+    return audio_engine.get_status().get("active_sessions", [])
+
+@app.post("/api/playback/sessions/{session_id}/stop")
+def stop_playback_session(session_id: str):
+    success = audio_engine.stop_session(session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Sesi '{session_id}' tidak ditemukan")
+    return {"message": f"Sesi {session_id} dihentikan", "status": audio_engine.get_status()}
+
+@app.get("/api/playback/queue")
+def get_playback_queue():
+    return audio_engine.get_status().get("queue", [])
+
+@app.delete("/api/playback/queue/{queue_id}")
+def delete_playback_queue_item(queue_id: str):
+    success = audio_engine.remove_queued_item(queue_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Item antrean '{queue_id}' tidak ditemukan")
+    return {"message": f"Item antrean {queue_id} dihapus", "status": audio_engine.get_status()}
 
 # --- SPEAKERS MONITORING & CRUD ---
 class SpeakerCreate(BaseModel):
