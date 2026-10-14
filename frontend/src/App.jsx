@@ -1260,6 +1260,28 @@ export default function App() {
     }
   };
 
+  // Stop a specific active broadcast session
+  const handleStopSession = async (sessionId, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await fetch(`/api/playback/sessions/${sessionId}/stop`, { method: 'POST' });
+      fetchData();
+    } catch (err) {
+      console.error('Gagal menghentikan sesi:', err);
+    }
+  };
+
+  // Delete an item from playback queue
+  const handleDeleteQueueItem = async (queueId, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await fetch(`/api/playback/queue/${queueId}`, { method: 'DELETE' });
+      fetchData();
+    } catch (err) {
+      console.error('Gagal menghapus antrean:', err);
+    }
+  };
+
   // Trigger Schedule Manually according to its own target
   const handleTriggerSchedule = async (schedule) => {
     if (isActionBusyRef.current || triggeringScheduleId) return;
@@ -1911,12 +1933,29 @@ export default function App() {
   };
 
   const isPlaying = playback.status === 'STREAMING' || playback.status === 'PLAYING';
+  const activeSessions = Array.isArray(playback.active_sessions) ? playback.active_sessions : [];
+  const activeQueue = Array.isArray(playback.queue) ? playback.queue : [];
+  const hasMultipleSessions = activeSessions.length > 1;
 
-  const isEmergency = isPlaying && (
+  const hasEmergency = isPlaying && (
+    activeSessions.some(s => s.priority === 1 || (s.category || '').toLowerCase() === 'darurat' || (s.title || '').toLowerCase().includes('sirine') || (s.title || '').toLowerCase().includes('darurat') || (s.title || '').toLowerCase().includes('ews')) ||
     (playback.title || '').toLowerCase().includes('sirine') || 
     (playback.title || '').toLowerCase().includes('darurat') ||
     (playback.title || '').toLowerCase().includes('ews')
   );
+
+  const hasSafety = isPlaying && !hasEmergency && (
+    activeSessions.some(s => s.priority === 2 || (s.category || '').toLowerCase() === 'safety' || (s.title || '').toLowerCase().includes('safety') || (s.title || '').toLowerCase().includes('k3')) ||
+    (playback.category || '').toLowerCase() === 'safety'
+  );
+
+  const barBgClass = hasEmergency
+    ? 'bg-rose-700 text-white border-rose-800'
+    : hasSafety
+      ? 'bg-amber-600 text-white border-amber-700'
+      : isPlaying
+        ? 'bg-blue-600 text-white border-blue-700'
+        : 'bg-white text-slate-800 border-slate-200/90 shadow-2xs';
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans">
@@ -1995,65 +2034,138 @@ export default function App() {
         </div>
       </header>
 
-      {/* 2. ACTIVE BROADCAST BAR (STATUS + SOUNDBOARD MINI) */}
-      <section className={`border-b transition-colors ${
-        isEmergency
-          ? 'bg-rose-700 text-white border-rose-800'
-          : isPlaying 
-            ? 'bg-blue-600 text-white border-blue-700' 
-            : 'bg-white text-slate-800 border-slate-200/90 shadow-2xs'
-      }`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-15 flex items-center justify-between gap-3">
+      {/* 2. ACTIVE BROADCAST BAR (STATUS + SOUNDBOARD MINI / MULTI-ZONE SESSIONS) */}
+      <section className={`border-b transition-colors ${barBgClass}`}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 min-h-15 py-2.5 flex flex-wrap items-center justify-between gap-3">
           {/* Status Pill & Live Info */}
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1 flex-wrap">
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ${
-              isEmergency
+              hasEmergency
                 ? 'bg-rose-800 text-white border border-rose-500'
-                : isPlaying
-                  ? 'bg-blue-700 text-white border border-blue-500'
-                  : 'bg-slate-100 text-slate-700 border border-slate-200/90'
+                : hasSafety
+                  ? 'bg-amber-700 text-white border border-amber-500'
+                  : isPlaying
+                    ? 'bg-blue-700 text-white border border-blue-500'
+                    : 'bg-slate-100 text-slate-700 border border-slate-200/90'
             }`}>
               <span className={`w-2 h-2 rounded-full ${
-                isEmergency 
+                hasEmergency 
                   ? 'bg-white animate-ping' 
                   : isPlaying 
                     ? 'bg-emerald-400 animate-pulse' 
                     : 'bg-emerald-500'
               }`} />
-              {isEmergency ? 'Darurat' : isPlaying ? 'Berbunyi' : 'Siaga'}
+              {hasEmergency 
+                ? (hasMultipleSessions ? `Darurat (${activeSessions.length} Zona)` : 'Darurat')
+                : hasSafety
+                  ? (hasMultipleSessions ? `K3 (${activeSessions.length} Zona)` : 'K3 / Safety')
+                  : isPlaying 
+                    ? (hasMultipleSessions ? `Berbunyi (${activeSessions.length} Zona)` : 'Berbunyi')
+                    : 'Siaga'}
             </span>
 
-            <span className={`${isPlaying || isEmergency ? 'text-white/40' : 'text-slate-300'} hidden md:inline`}>•</span>
+            {isPlaying ? (
+              hasMultipleSessions ? (
+                /* Multiple Simultaneous Sessions: Render Session Chips */
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  {activeSessions.map((s) => {
+                    const isPrio1 = s.priority === 1 || (s.category || '').toLowerCase() === 'darurat';
+                    const isPrio2 = s.priority === 2 || (s.category || '').toLowerCase() === 'safety';
+                    return (
+                      <div 
+                        key={s.session_id} 
+                        className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-xl text-xs font-medium border shadow-2xs backdrop-blur-xs ${
+                          isPrio1
+                            ? 'bg-rose-900/60 border-rose-400 text-rose-100'
+                            : isPrio2
+                              ? 'bg-amber-900/50 border-amber-300 text-amber-100'
+                              : 'bg-black/20 border-white/20 text-white'
+                        }`}
+                      >
+                        <span className="font-semibold text-white/95 truncate max-w-[120px] sm:max-w-[160px]">
+                          {s.target_desc}:
+                        </span>
+                        <span className="truncate max-w-[120px] sm:max-w-[180px]">
+                          {s.title}
+                        </span>
+                        <span className="text-[11px] opacity-80 shrink-0 font-mono">
+                          {formatSec(s.elapsed)}/{formatSec(s.duration)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => handleStopSession(s.session_id, e)}
+                          title={`Hentikan sesi ${s.target_desc}`}
+                          className="hover:bg-white/20 rounded p-0.5 text-white/80 hover:text-white transition-colors cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                /* Single Active Session */
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-white/40 hidden md:inline">•</span>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold truncate max-w-xs sm:max-w-md text-white">
+                      {playback.title}
+                    </h2>
+                    {playback.target_desc && (
+                      <span className="text-[11px] text-white/70 block truncate">
+                        Target: {playback.target_desc}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            ) : (
+              /* Idle */
+              <>
+                <span className="text-slate-300 hidden md:inline">•</span>
+                <h2 className="text-sm font-semibold truncate max-w-xs sm:max-w-sm text-slate-800">
+                  Server Siap Menyiarkan
+                </h2>
+              </>
+            )}
 
-            <h2 className={`text-sm font-semibold truncate max-w-xs sm:max-w-sm ${
-              isPlaying || isEmergency ? 'text-white' : 'text-slate-800'
-            }`}>
-              {isPlaying ? playback.title : 'Server Siap Menyiarkan'}
-            </h2>
+            {/* Queue Badge if any waiting items */}
+            {activeQueue.length > 0 && (
+              <span 
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-400/20 text-amber-100 border border-amber-300/40 shrink-0"
+                title={`${activeQueue.length} jadwal sedang menunggu giliran speaker: ${activeQueue.map(q => q.title).join(', ')}`}
+              >
+                <Clock className="w-3 h-3 text-amber-300" />
+                <span>+{activeQueue.length} Antrean</span>
+              </span>
+            )}
           </div>
 
           {/* Soundboard Mini & Controls */}
           <div className="flex items-center gap-2 shrink-0">
             {isPlaying ? (
               <>
-                <div className="flex items-center gap-2 mr-1">
-                  <span className="text-xs font-medium text-blue-100 hidden sm:inline">
-                    {formatSec(playback.elapsed)} / {formatSec(playback.duration)}
-                  </span>
-                  <div className="w-16 sm:w-28 bg-black/30 rounded-full h-1.5 overflow-hidden">
-                    <div 
-                      className="bg-emerald-400 h-full transition-all duration-300"
-                      style={{ width: `${playback.duration ? Math.min(100, (playback.elapsed / playback.duration) * 100) : 0}%` }}
-                    />
+                {!hasMultipleSessions && (
+                  <div className="flex items-center gap-2 mr-1">
+                    <span className="text-xs font-medium text-white/90 hidden sm:inline">
+                      {formatSec(playback.elapsed)} / {formatSec(playback.duration)}
+                    </span>
+                    <div className="w-16 sm:w-28 bg-black/30 rounded-full h-1.5 overflow-hidden">
+                      <div 
+                        className="bg-emerald-400 h-full transition-all duration-300"
+                        style={{ width: `${playback.duration ? Math.min(100, (playback.elapsed / playback.duration) * 100) : 0}%` }}
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <button 
                   onClick={handleStop}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                  title="Hentikan semua siaran audio yang sedang aktif"
                 >
                   <Square className="w-3.5 h-3.5 fill-current" />
-                  <span>Hentikan Siaran</span>
+                  <span>{hasMultipleSessions ? 'Hentikan Semua' : 'Hentikan Siaran'}</span>
                 </button>
               </>
             ) : (
@@ -2092,7 +2204,7 @@ export default function App() {
                   }}
                   speakers={speakers}
                   groupsList={groupsList}
-                  variant={isPlaying || isEmergency ? 'dark' : 'light'}
+                  variant={isPlaying || hasEmergency ? 'dark' : 'light'}
                   size="sm"
                   buttonClassName="min-w-[150px] max-w-[220px] sm:max-w-[280px]"
                 />
