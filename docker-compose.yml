@@ -21,6 +21,7 @@ services:
     volumes:
       # Persistent storage database SQLite dan berkas audio WAV
       - ./backend/storage:/app/backend/storage
+      - ./backend/app:/app/backend/app
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7080/api/health"]
