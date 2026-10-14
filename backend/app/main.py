@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.config import AUDIO_DIR, BASE_DIR, DEFAULT_MULTICAST_IP, DEFAULT_MULTICAST_PORT
@@ -22,6 +22,7 @@ from app.database import (
     parse_groups
 )
 from app.audio_engine import audio_engine
+from app.stream_hub import stream_hub
 from app.scheduler import scheduler, reload_schedules
 from app.ping_service import ping_ip, scan_all_speakers_parallel, ping_monitor
 
@@ -446,6 +447,43 @@ async def node_heartbeat(req: NodeHeartbeatRequest, request: Request):
         "status": "ok",
         "node": node
     }
+
+@app.get("/api/stream")
+async def stream_live(request: Request, node_id: str = ""):
+    """
+    Stream audio live (G.711 A-law 8kHz mono, mentah) untuk PC client Windows.
+    Koneksi dibiarkan terbuka; data hanya mengalir saat ada siaran yang menarget node ini.
+    """
+    node_id = (node_id or "").strip()
+    if not node_id:
+        raise HTTPException(status_code=400, detail="node_id wajib diisi")
+
+    token, q = stream_hub.subscribe(node_id, asyncio.get_running_loop())
+
+    async def gen():
+        try:
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(q.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    if await request.is_disconnected():
+                        break
+                    continue
+                chunks = [chunk]
+                while not q.empty() and len(chunks) < 10:
+                    try:
+                        chunks.append(q.get_nowait())
+                    except asyncio.QueueEmpty:
+                        break
+                yield b"".join(chunks)
+        finally:
+            stream_hub.unsubscribe(token)
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Audio-Format": "alaw;rate=8000;ch=1"},
+    )
 
 @app.get("/api/speakers")
 def list_speakers():

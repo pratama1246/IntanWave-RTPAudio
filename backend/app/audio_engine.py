@@ -6,7 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Optional, Callable, List
 from app.config import DEFAULT_MULTICAST_IP, DEFAULT_MULTICAST_PORT, AUDIO_DIR, BASE_DIR
-from app.database import log_event, get_settings
+from app.database import log_event, get_settings, get_db
+from app.stream_hub import stream_hub
 
 class AudioEngine:
     def __init__(self):
@@ -122,59 +123,81 @@ class AudioEngine:
         self.status = "STREAMING"
         self._stop_event.clear()
 
-        # 1. Output RTP (Multicast atau Selektif)
+        # 1. Klasifikasi target:
+        #    - speaker fisik / multicast  -> RTP
+        #    - PC client Windows (node)   -> HTTP stream (/api/stream), tanpa RTP/multicast/dedup
+        rtp_endpoints = list(dict.fromkeys(target_endpoints)) if target_endpoints else None
+        http_all = False
+        http_nodes = set()
         if self.enable_multicast:
-            # Hilangkan endpoint duplikat (urutan dipertahankan)
-            if target_endpoints:
-                target_endpoints = list(dict.fromkeys(target_endpoints))
-
-            # Tentukan output destinations
-            if target_endpoints and len(target_endpoints) > 0:
-                if len(target_endpoints) == 1:
-                    rtp_args = [
-                        "-af", "aresample=8000:async=1,asetnsamples=n=160",
-                        "-acodec", "pcm_alaw",
-                        "-ac", "1",
-                        "-f", "rtp", f"rtp://{target_endpoints[0]}?pkt_size=172"
-                    ]
+            mc_ep = f"{mc_ip}:{mc_port}"
+            if rtp_endpoints is None or mc_ep in (rtp_endpoints or []):
+                http_all = True  # siaran global / multicast: semua node ikut
+            node_by_ip = self._get_node_ip_map()
+            kept = []
+            for ep in (rtp_endpoints or []):
+                ip = ep.split(":")[0]
+                if ip in node_by_ip:
+                    http_nodes.add(node_by_ip[ip])
                 else:
-                    # FFmpeg tee muxer untuk multiple outputs. Semua output memakai SSRC & seq awal yang SAMA
-                    # agar client yang menerima unicast + multicast dapat membuang paket duplikat (anti audio dobel).
-                    shared_ssrc = random.randint(1, 2**31 - 1)
-                    tee_outputs = "|".join([
-                        f"[select=a:f=rtp:ssrc={shared_ssrc}:seq=0]rtp://{ep}?pkt_size=172"
-                        for ep in target_endpoints
-                    ])
-                    rtp_args = [
-                        "-af", "aresample=8000:async=1,asetnsamples=n=160",
-                        "-map", "0:a",
-                        "-c:a", "pcm_alaw",
-                        "-ac", "1",
-                        "-f", "tee", tee_outputs
-                    ]
-            else:
-                # Default global multicast
-                rtp_args = [
-                    "-af", "aresample=8000:async=1,asetnsamples=n=160",
-                    "-acodec", "pcm_alaw",
-                    "-ac", "1",
-                    "-f", "rtp", f"rtp://{mc_ip}:{mc_port}?pkt_size=172"
-                ]
+                    kept.append(ep)
+            rtp_endpoints = kept
+        use_http = self.enable_multicast and (http_all or bool(http_nodes))
 
-            rtp_cmd = [
+        # Output RTP (speaker fisik / multicast)
+        rtp_list = []
+        if self.enable_multicast:
+            rtp_list = rtp_endpoints if rtp_endpoints is not None else [f"{mc_ip}:{mc_port}"]
+
+        net_cmd_args = None
+        if len(rtp_list) == 1 and not use_http:
+            net_cmd_args = [
+                "-af", "aresample=8000:async=1,asetnsamples=n=160",
+                "-acodec", "pcm_alaw",
+                "-ac", "1",
+                "-f", "rtp", f"rtp://{rtp_list[0]}?pkt_size=172"
+            ]
+        elif rtp_list or use_http:
+            # tee muxer: beberapa output sekaligus dari satu decode (clock sama persis)
+            shared_ssrc = random.randint(1, 2**31 - 1)
+            slaves = [
+                f"[select=a:f=rtp:ssrc={shared_ssrc}:seq=0]rtp://{ep}?pkt_size=172"
+                for ep in rtp_list
+            ]
+            if use_http:
+                # A-law mentah 20ms per chunk, di-flush per paket supaya latensi minimal
+                slaves.append("[select=a:f=alaw:flush_packets=1]pipe:1")
+            net_cmd_args = [
+                "-af", "aresample=8000:async=1,asetnsamples=n=160",
+                "-map", "0:a",
+                "-c:a", "pcm_alaw",
+                "-ac", "1",
+                "-f", "tee", "|".join(slaves)
+            ]
+
+        if net_cmd_args:
+            net_cmd = [
                 "ffmpeg", "-re", "-y",
                 "-i", str(path_obj.resolve()),
-                *rtp_args
+                *net_cmd_args
             ]
             try:
+                if use_http:
+                    stream_hub.begin(all_nodes=http_all, nodes=http_nodes)
                 self.multicast_proc = subprocess.Popen(
-                    rtp_cmd,
-                    stdout=subprocess.DEVNULL,
+                    net_cmd,
+                    stdout=subprocess.PIPE if use_http else subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    bufsize=0,
                     creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
                 )
+                if use_http:
+                    threading.Thread(
+                        target=self._pump_stream, args=(self.multicast_proc,), daemon=True
+                    ).start()
             except Exception as e:
-                log_event("RTP_ERROR", f"Gagal menjalankan RTP ffmpeg: {e}", level="ERROR")
+                stream_hub.end()
+                log_event("RTP_ERROR", f"Gagal menjalankan ffmpeg stream: {e}", level="ERROR")
 
         # 2. Output Windows Audio (ffplay ke speaker lokal)
         if self.enable_local:
@@ -274,5 +297,31 @@ class AudioEngine:
                         pass
         self.multicast_proc = None
         self.local_proc = None
+        stream_hub.end()
+
+    @staticmethod
+    def _get_node_ip_map() -> dict:
+        """Peta IP -> node_id untuk PC client Windows (node) yang aktif. Node menerima audio via HTTP, bukan RTP."""
+        try:
+            with get_db() as conn:
+                rows = conn.execute(
+                    "SELECT ip_address, node_id FROM speakers "
+                    "WHERE enabled = 1 AND device_type = 'node' AND node_id IS NOT NULL AND node_id != ''"
+                ).fetchall()
+            return {r["ip_address"]: r["node_id"] for r in rows}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _pump_stream(proc):
+        """Baca A-law mentah dari stdout FFmpeg (per ~20ms) lalu bagikan ke semua client HTTP."""
+        try:
+            while True:
+                chunk = proc.stdout.read(160)
+                if not chunk:
+                    break
+                stream_hub.publish(chunk)
+        except Exception:
+            pass
 
 audio_engine = AudioEngine()
