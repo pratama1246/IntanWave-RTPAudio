@@ -569,7 +569,7 @@ def test_speaker_audio_endpoint(speaker_id: int):
     if not sp:
         raise HTTPException(status_code=404, detail="Speaker tidak ditemukan")
     try:
-        audio_engine.test_speaker_audio(sp["ip_address"], sp["port"])
+        audio_engine.test_speaker_audio(sp["ip_address"], sp["port"], node_id=sp.get("node_id"))
         return {"message": f"Uji suara dikirim ke {sp['name']} ({sp['ip_address']})"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

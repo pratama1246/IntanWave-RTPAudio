@@ -222,12 +222,53 @@ class AudioEngine:
         self.monitor_thread = threading.Thread(target=self._monitor_playback, daemon=True)
         self.monitor_thread.start()
 
-    def test_speaker_audio(self, ip: str, port: int = 5004):
-        """Memutar jingle test pendek langsung ke satu speaker tertentu."""
+    def test_speaker_audio(self, ip: str, port: int = 5004, node_id: Optional[str] = None):
+        """Memutar jingle test pendek langsung ke satu speaker tertentu (RTP untuk speaker fisik, HTTP stream untuk PC Node)."""
         chime_path = AUDIO_DIR / "test_chime.wav"
         if not chime_path.exists():
             raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
 
+        # Cek apakah target adalah PC Node
+        node_map = self._get_node_ip_map()
+        target_node = node_id or node_map.get(ip)
+
+        if target_node:
+            cmd = [
+                "ffmpeg", "-re", "-y",
+                "-i", str(chime_path.resolve()),
+                "-af", "aresample=8000:async=1,asetnsamples=n=160",
+                "-c:a", "pcm_alaw",
+                "-ac", "1",
+                "-f", "alaw", "-flush_packets", "1",
+                "pipe:1"
+            ]
+            try:
+                stream_hub.begin(all_nodes=False, nodes={target_node})
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    bufsize=0,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+                )
+                def _pump():
+                    try:
+                        while True:
+                            chunk = proc.stdout.read(160)
+                            if not chunk:
+                                break
+                            stream_hub.publish(chunk)
+                    finally:
+                        stream_hub.end()
+                threading.Thread(target=_pump, daemon=True).start()
+                log_event("TEST_AUDIO", f"Mengirimkan uji suara HTTP ke PC Node {target_node} ({ip})")
+                return
+            except Exception as e:
+                stream_hub.end()
+                log_event("TEST_AUDIO_ERROR", f"Gagal uji suara HTTP ke PC Node {target_node}: {e}", level="ERROR")
+                raise e
+
+        # Target adalah speaker fisik (RTP)
         rtp_url = f"rtp://{ip}:{port}?pkt_size=172"
         cmd = [
             "ffmpeg", "-re", "-y",
@@ -245,7 +286,7 @@ class AudioEngine:
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
             )
-            log_event("TEST_AUDIO", f"Mengirimkan uji suara ke {ip}:{port}")
+            log_event("TEST_AUDIO", f"Mengirimkan uji suara RTP ke {ip}:{port}")
         except Exception as e:
             log_event("TEST_AUDIO_ERROR", f"Gagal uji suara ke {ip}: {e}", level="ERROR")
             raise e
