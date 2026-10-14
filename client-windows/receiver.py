@@ -81,7 +81,7 @@ class AudioReceiver:
     2. Siaran Darurat IP Phone Control Room tetap diterima lewat socket UDP Multicast sekunder (RTP).
     3. Output dipipa langsung ke ffplay secara non-blocking dengan buffer adaptif ~120ms (tahan jitter WiFi).
     """
-    PREBUFFER_PACKETS = 6  # 6 paket x 20ms = ~120ms initial prebuffer (latensi ultra-rendah & tahan jitter)
+    PREBUFFER_PACKETS = 2  # 2 paket x 20ms = ~40ms initial prebuffer (latensi ultra-rendah & instan)
 
     def __init__(self, on_status_change=None, on_heartbeat_change=None):
         self.config = self.load_config()
@@ -504,14 +504,12 @@ class AudioReceiver:
             self.player_proc = None
 
     def _feed_player(self, data: bytes):
-        """Menulis chunk audio mentah ke ffplay dengan prebuffer kecil (~120ms) untuk mencegah jitter WiFi."""
+        """Menulis chunk audio mentah ke ffplay dengan prebuffer kecil (~40ms) untuk responsivitas instan."""
+        if not (self.player_proc and self.player_proc.stdin and self.player_proc.poll() is None):
+            self._start_player(self.player_codec or "s16le", getattr(self, "player_sample_rate", 44100) or 44100)
         if not (self.player_proc and self.player_proc.stdin):
             return
         try:
-            if self.player_proc.poll() is not None:
-                self._close_player()
-                return
-
             if not self.prebuf_ready:
                 self.prebuf.append(data)
                 if len(self.prebuf) >= self.PREBUFFER_PACKETS:
@@ -524,9 +522,10 @@ class AudioReceiver:
                 self.player_proc.stdin.flush()
         except Exception:
             self._close_player()
+            self._start_player(self.player_codec or "s16le", getattr(self, "player_sample_rate", 44100) or 44100)
 
     def _close_player(self):
-        """Menutup proses ffplay dan melepaskan sound card saat siaran selesai."""
+        """Menutup proses ffplay dan melepaskan sound card saat aplikasi ditutup atau codec berganti."""
         if self.player_proc and self.prebuf and not self.prebuf_ready:
             try:
                 self.player_proc.stdin.write(b"".join(self.prebuf))
@@ -765,8 +764,9 @@ class AudioReceiver:
 
             if self.is_running:
                 if self.active_source == "WS":
-                    self._close_player()
                     self.active_source = None
+                    self.prebuf = []
+                    self.prebuf_ready = False
                     self.set_status("STANDBY", "biasa", "")
                 time.sleep(1.5)
 
@@ -931,9 +931,20 @@ class AudioReceiver:
             time.sleep(0.1)
             if self.status == "STREAMING":
                 if time.time() - self.last_audio_time > 0.8:
-                    self._close_player()
+                    if self.player_proc and self.player_proc.stdin and self.prebuf:
+                        try:
+                            self.player_proc.stdin.write(b"".join(self.prebuf))
+                            self.player_proc.stdin.flush()
+                        except Exception:
+                            pass
+                    self.prebuf = []
+                    self.prebuf_ready = False
                     self.active_source = None
                     self.set_status("STANDBY", "biasa", "")
+
+                    # Pastikan player standby tetap pre-warmed untuk siaran Server PA HD (s16le, 44100)
+                    if not (self.player_proc and self.player_proc.poll() is None and self.player_codec == "s16le" and getattr(self, "player_sample_rate", 44100) == 44100):
+                        self._start_player("s16le", 44100)
 
     # =========================================================================
     # LIFECYCLE MANAGEMENT (Start, Stop, Test Audio)
@@ -942,6 +953,10 @@ class AudioReceiver:
         if self.is_running:
             return
         self.is_running = True
+
+        # Pre-warm / Hot-Standby Audio Player
+        # Membuka ffplay ke Windows Audio Engine (WASAPI) sejak awal agar tidak ada delay cold-start (0% CPU saat idle)
+        self._start_player("s16le", 44100)
 
         self.stream_thread = threading.Thread(target=self._ws_stream_loop, daemon=True)
         self.stream_thread.start()
