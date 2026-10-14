@@ -880,7 +880,10 @@ export default function App() {
       const wsUrl = `${protocol}//${window.location.host}/ws`;
       ws = new WebSocket(wsUrl);
 
-      ws.onopen = () => setWsConnected(true);
+      ws.onopen = () => {
+        setWsConnected(true);
+        fetchData();
+      };
       ws.onclose = () => {
         setWsConnected(false);
         setTimeout(connectWs, 2000);
@@ -894,6 +897,10 @@ export default function App() {
             setGroups(data.groups);
           } else if (data.type === 'zones_update' && Array.isArray(data.zones)) {
             setGroups(data.zones);
+          } else if (data.type === 'audio_update' && Array.isArray(data.audio_list)) {
+            setAudioList(data.audio_list);
+          } else if (data.type === 'schedules_update' && Array.isArray(data.schedules)) {
+            setSchedules(data.schedules);
           } else if (data.status) {
             setPlayback(data);
           }
@@ -904,6 +911,27 @@ export default function App() {
     connectWs();
     return () => {
       if (ws) ws.close();
+    };
+  }, []);
+
+  // Auto-sync on window focus / tab visibility change and periodic background sync (Gausah refresh manual)
+  useEffect(() => {
+    const handleSync = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData();
+      }
+    };
+    window.addEventListener('focus', handleSync);
+    document.addEventListener('visibilitychange', handleSync);
+
+    const pollInterval = setInterval(() => {
+      fetchData();
+    }, 15000);
+
+    return () => {
+      window.removeEventListener('focus', handleSync);
+      document.removeEventListener('visibilitychange', handleSync);
+      clearInterval(pollInterval);
     };
   }, []);
 

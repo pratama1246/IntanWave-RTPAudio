@@ -208,10 +208,11 @@ async def upload_audio(
         conn.commit()
 
     log_event("AUDIO_UPLOADED", f"Berhasil mengunggah '{disp_name}' [{cat.upper()}] ({file.filename})")
+    await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
     return {"message": "Upload berhasil", "filename": file.filename, "category": cat}
 
 @app.patch("/api/audio/{audio_id}")
-def update_audio_info(audio_id: int, req: AudioUpdateRequest):
+async def update_audio_info(audio_id: int, req: AudioUpdateRequest):
     with get_db() as conn:
         row = conn.execute("SELECT * FROM audio_files WHERE id = ?", (audio_id,)).fetchone()
         if not row:
@@ -237,10 +238,11 @@ def update_audio_info(audio_id: int, req: AudioUpdateRequest):
             conn.commit()
             log_event("AUDIO_UPDATED", f"Memperbarui audio ID {audio_id}: [{cat.upper() if cat else row['category'].upper()}] {req.display_name or row['display_name']}")
             
+    await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
     return {"message": "Audio berhasil diperbarui"}
 
 @app.delete("/api/audio/{audio_id}")
-def delete_audio(audio_id: int):
+async def delete_audio(audio_id: int):
     with get_db() as conn:
         row = conn.execute("SELECT * FROM audio_files WHERE id = ?", (audio_id,)).fetchone()
         if not row:
@@ -257,6 +259,7 @@ def delete_audio(audio_id: int):
         conn.commit()
 
     log_event("AUDIO_DELETED", f"Menghapus audio: '{row['display_name']}'")
+    await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
     return {"message": "Audio berhasil dihapus"}
 
 @app.get("/api/audio/{audio_id}/stream")
@@ -831,7 +834,7 @@ def normalize_time_str(time_str: str) -> str:
     return ", ".join(sorted(list(times)))
 
 @app.post("/api/schedules")
-def create_schedule(s: ScheduleCreate):
+async def create_schedule(s: ScheduleCreate):
     t_group = (s.target_group or s.target_zone or "").strip()
     norm_time = normalize_time_str(s.time_str)
     with get_db() as conn:
@@ -844,10 +847,11 @@ def create_schedule(s: ScheduleCreate):
 
     reload_schedules()
     log_event("SCHEDULE_CREATED", f"Membuat jadwal baru: '{s.name}' pada {norm_time}")
+    await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
     return {"message": "Jadwal berhasil dibuat"}
 
 @app.put("/api/schedules/{schedule_id}")
-def update_schedule(schedule_id: int, s: ScheduleCreate):
+async def update_schedule(schedule_id: int, s: ScheduleCreate):
     t_group = (s.target_group or s.target_zone or "").strip()
     norm_time = normalize_time_str(s.time_str)
     with get_db() as conn:
@@ -862,10 +866,11 @@ def update_schedule(schedule_id: int, s: ScheduleCreate):
 
     reload_schedules()
     log_event("SCHEDULE_UPDATED", f"Memperbarui jadwal: '{s.name}' pada {norm_time}")
+    await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
     return {"message": "Jadwal berhasil diperbarui"}
 
 @app.patch("/api/schedules/{schedule_id}/toggle")
-def toggle_schedule(schedule_id: int):
+async def toggle_schedule(schedule_id: int):
     with get_db() as conn:
         row = conn.execute("SELECT enabled, name FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
         if not row:
@@ -877,16 +882,18 @@ def toggle_schedule(schedule_id: int):
 
     reload_schedules()
     log_event("SCHEDULE_TOGGLE", f"Mengubah status jadwal '{row['name']}' menjadi {'AKTIF' if new_val else 'NONAKTIF'}")
+    await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
     return {"message": "Status jadwal diperbarui", "enabled": bool(new_val)}
 
 @app.delete("/api/schedules/{schedule_id}")
-def delete_schedule(schedule_id: int):
+async def delete_schedule(schedule_id: int):
     with get_db() as conn:
         conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
         conn.commit()
 
     reload_schedules()
     log_event("SCHEDULE_DELETED", f"Menghapus jadwal id {schedule_id}")
+    await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
     return {"message": "Jadwal berhasil dihapus"}
 
 _last_manual_triggers = {}
