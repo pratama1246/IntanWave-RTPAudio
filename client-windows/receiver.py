@@ -203,9 +203,11 @@ class AudioReceiver:
             changed = True
         clean_host = socket.gethostname().lower().replace(" ", "_").replace("-", "_")
         curr_node_id = cfg.get("node_id", "")
-        # Jika node_id kosong, default lama, atau hostname berubah karena folder di-copy ke PC lain
-        if not curr_node_id or curr_node_id == "node_client_01" or not curr_node_id.startswith(f"node_{clean_host}_"):
-            cfg["node_id"] = f"node_{clean_host}_{uuid.uuid4().hex[:6]}"
+        # Identitas node permanen & stabil per PC (berdasarkan Windows hostname).
+        # Tidak menggunakan random UUID agar saat rebuild atau restart, node_id tetap konsisten dan tidak membuat duplikat di server.
+        stable_node_id = f"node_{clean_host}"
+        if not curr_node_id or curr_node_id == "node_client_01" or not curr_node_id.startswith(f"node_{clean_host}"):
+            cfg["node_id"] = stable_node_id
             changed = True
         if not cfg.get("device_name") or cfg.get("device_name") == "Terminal Audio Node (Amplifier)":
             cfg["device_name"] = f"Terminal Audio ({socket.gethostname()})"

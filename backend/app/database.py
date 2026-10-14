@@ -408,103 +408,73 @@ def upsert_node_heartbeat(
             cursor.execute("INSERT OR IGNORE INTO groups (name) VALUES (?)", (g,))
             cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (g,))
 
-        # 2. Tangani benturan IP jika IP ini pernah dipegang oleh record lain
+        # 2. Cari apakah record node ini sudah ada di database
+        #    Cek bertahap:
+        #    a. Berdasarkan node_id yang sama persis
+        #    b. ATAU berdasarkan hostname PC yang sama persis (jika node_id sempat berubah karena rebuild/reinstall)
+        #    c. ATAU berdasarkan ip_address yang sama (khusus device_type = 'node')
+        cursor.execute("SELECT * FROM speakers WHERE node_id = ?", (node_id,))
+        existing = cursor.fetchone()
+
+        if not existing and hostname:
+            cursor.execute(
+                "SELECT * FROM speakers WHERE device_type = 'node' AND LOWER(hostname) = LOWER(?) ORDER BY id DESC LIMIT 1",
+                (hostname,)
+            )
+            existing = cursor.fetchone()
+
+        if not existing and ip_address:
+            cursor.execute(
+                "SELECT * FROM speakers WHERE device_type = 'node' AND ip_address = ? ORDER BY id DESC LIMIT 1",
+                (ip_address,)
+            )
+            existing = cursor.fetchone()
+
+        # 3. Tangani benturan IP pada record LAIN (misal IP speaker fisik yang sama atau record lama yang bukan existing ini)
+        target_id = existing["id"] if existing else -1
         cursor.execute(
-            "SELECT id, node_id, name FROM speakers WHERE ip_address = ? AND (node_id IS NULL OR node_id != ?)",
-            (ip_address, node_id)
+            "SELECT id, device_type FROM speakers WHERE ip_address = ? AND id != ?",
+            (ip_address, target_id)
         )
         conflicts = cursor.fetchall()
         for conf in conflicts:
             c_id = conf["id"]
-            cursor.execute(
-                "UPDATE speakers SET ip_address = ?, status = 'offline' WHERE id = ?",
-                (f"pending-{c_id}-{int(datetime.now().timestamp())}", c_id)
-            )
-
-        # 3. Cek apakah node_id sudah ada di database
-        cursor.execute("SELECT * FROM speakers WHERE node_id = ?", (node_id,))
-        existing = cursor.fetchone()
-
-        # Deteksi jika ada 2 PC berbeda yang mengirim node_id yang sama (misal hasil cloning/copy folder).
-        # Hanya dianggap clone jika hostname BERBEDA. Hostname sama + IP berubah = DHCP/WiFi roaming -> cukup update IP.
-        if (
-            existing
-            and existing["ip_address"] != ip_address
-            and hostname
-            and existing["hostname"]
-            and existing["hostname"] != hostname
-        ):
-            is_cloned_node = False
-            if existing["last_online"]:
-                try:
-                    delta = (datetime.now() - datetime.fromisoformat(existing["last_online"])).total_seconds()
-                    if delta <= 90:
-                        is_cloned_node = True
-                except Exception:
-                    is_cloned_node = True
+            if conf["device_type"] == "node":
+                # Jika record lama yang berbenturan juga PC Node (duplikat lama), hapus agar database selalu bersih!
+                cursor.execute("DELETE FROM speakers WHERE id = ?", (c_id,))
             else:
-                is_cloned_node = True
-
-            if is_cloned_node:
-                # Pisahkan node_id untuk PC ini agar keduanya terdaftar terpisah sebagai speaker mandiri
-                node_id = f"{node_id}_{ip_address.replace('.', '_')}"
-                cursor.execute("SELECT * FROM speakers WHERE node_id = ?", (node_id,))
-                existing = cursor.fetchone()
+                cursor.execute(
+                    "UPDATE speakers SET ip_address = ?, status = 'offline' WHERE id = ?",
+                    (f"pending-{c_id}-{int(datetime.now().timestamp())}", c_id)
+                )
 
         if existing:
             speaker_id = existing["id"]
-            if force_update:
-                cursor.execute("""
-                    UPDATE speakers
-                    SET name = ?,
-                        ip_address = ?,
-                        port = ?,
-                        zone = ?,
-                        groups = ?,
-                        hostname = ?,
-                        status = 'online',
-                        latency_ms = 1,
-                        last_online = ?,
-                        last_checked = ?,
-                        device_type = 'node'
-                    WHERE id = ?
-                """, (device_name, ip_address, port, primary_group, grp_json, hostname, now, now, speaker_id))
-            else:
-                curr_name = existing["name"] or ""
-                should_update_name = (not curr_name or curr_name in (
-                    "Terminal Audio Node (Amplifier)",
-                    "Terminal Audio Node",
-                    "Terminal Audio",
-                    "PC Audio"
-                )) and hostname
+            curr_name = existing["name"] or ""
+            should_update_name = (force_update or not curr_name or curr_name in (
+                "Terminal Audio Node (Amplifier)",
+                "Terminal Audio Node",
+                "Terminal Audio",
+                "PC Audio"
+            ))
+            final_name = device_name if (force_update or not curr_name) else (
+                f"Terminal Audio ({hostname})" if should_update_name and hostname else curr_name
+            )
 
-                if should_update_name:
-                    cursor.execute("""
-                        UPDATE speakers
-                        SET name = ?,
-                            ip_address = ?,
-                            port = ?,
-                            hostname = ?,
-                            status = 'online',
-                            latency_ms = 1,
-                            last_online = ?,
-                            last_checked = ?,
-                            device_type = 'node'
-                        WHERE id = ?
-                    """, (f"Terminal Audio ({hostname})", ip_address, port, hostname, now, now, speaker_id))
-                else:
-                    cursor.execute("""
-                        UPDATE speakers
-                        SET ip_address = ?,
-                            port = ?,
-                            hostname = ?,
-                            status = 'online',
-                            latency_ms = 1,
-                            last_online = ?,
-                            last_checked = ?,
-                            device_type = 'node'
-                        WHERE id = ?
-                    """, (ip_address, port, hostname, now, now, speaker_id))
+            cursor.execute("""
+                UPDATE speakers
+                SET name = ?,
+                    ip_address = ?,
+                    port = ?,
+                    node_id = ?,
+                    hostname = ?,
+                    status = 'online',
+                    latency_ms = 1,
+                    last_online = ?,
+                    last_checked = ?,
+                    device_type = 'node'
+                WHERE id = ?
+            """, (final_name, ip_address, port, node_id, hostname, now, now, speaker_id))
         else:
             cursor.execute("""
                 INSERT INTO speakers (
@@ -515,6 +485,13 @@ def upsert_node_heartbeat(
             """, (device_name, ip_address, port, primary_group, grp_json, now, now, node_id, hostname))
             speaker_id = cursor.lastrowid
 
+        # 4. Pembersihan otomatis: Hapus duplikat record node lain dengan hostname yang sama atau pending IP
+        if hostname:
+            cursor.execute(
+                "DELETE FROM speakers WHERE device_type = 'node' AND id != ? AND LOWER(hostname) = LOWER(?)",
+                (speaker_id, hostname)
+            )
+        cursor.execute("DELETE FROM speakers WHERE device_type = 'node' AND ip_address LIKE 'pending-%'")
         conn.commit()
 
         cursor.execute("SELECT * FROM speakers WHERE id = ?", (speaker_id,))
