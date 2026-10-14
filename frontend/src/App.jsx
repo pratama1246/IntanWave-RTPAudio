@@ -225,7 +225,9 @@ export default function App() {
     multicast_ip: '239.255.0.1',
     multicast_port: '5004',
     enable_multicast: 'true',
-    enable_local: 'true'
+    enable_local: 'true',
+    siren_audio_filename: 'sirine_ews_test.wav',
+    k3_audio_filename: 'safety_k3_chime.wav'
   });
 
   // Schedule form state
@@ -1414,27 +1416,17 @@ export default function App() {
                 <button
                   onClick={() => setShowSirenConfirmModal(true)}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
-                  title="Siarkan sirine peringatan darurat ke speaker luar"
+                  title="Siarkan sirine peringatan darurat ke speaker"
                 >
                   <Siren className="w-3.5 h-3.5" />
                   <span>Sirine</span>
                 </button>
 
-                {/* SOUNDBOARD MINI TRIGGER: APEL PAGI */}
-                <button
-                  onClick={() => handlePlayFilenameToSpeakers('test_chime.wav')}
-                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-all border border-slate-700 cursor-pointer"
-                  title="Siarkan bel Apel Pagi ke speaker luar"
-                >
-                  <Bell className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Apel Pagi</span>
-                </button>
-
                 {/* SOUNDBOARD MINI TRIGGER: PENGINGAT K3 */}
                 <button
-                  onClick={() => handlePlayFilenameToSpeakers('safety_k3_chime.wav')}
-                  className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-all border border-slate-700 cursor-pointer"
-                  title="Siarkan pengingat K3 ke speaker luar"
+                  onClick={() => handlePlayFilenameToSpeakers(settings.k3_audio_filename || 'safety_k3_chime.wav')}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-all border border-slate-700 cursor-pointer"
+                  title="Siarkan pengingat K3 ke speaker"
                 >
                   <HardHat className="w-3.5 h-3.5 text-emerald-400" />
                   <span>K3</span>
@@ -2367,7 +2359,7 @@ export default function App() {
                 <span className="text-slate-500 font-medium shrink-0">Berkas Suara:</span>
                 {emergencyAudios.length > 1 ? (
                   <select
-                    value={selectedEmergencyAudio || emergencyAudios[0]?.filename || 'sirine_ews_test.wav'}
+                    value={selectedEmergencyAudio || settings.siren_audio_filename || emergencyAudios[0]?.filename || 'sirine_ews_test.wav'}
                     onChange={e => setSelectedEmergencyAudio(e.target.value)}
                     className="px-2 py-1 rounded-lg border border-rose-300 bg-white text-xs text-rose-700 font-semibold outline-hidden"
                   >
@@ -2379,7 +2371,7 @@ export default function App() {
                   </select>
                 ) : (
                   <span className="font-semibold text-rose-600">
-                    {emergencyAudios[0]?.display_name || 'sirine_ews_test.wav'}
+                    {emergencyAudios.find(a => a.filename === settings.siren_audio_filename)?.display_name || emergencyAudios[0]?.display_name || settings.siren_audio_filename || 'sirine_ews_test.wav'}
                   </span>
                 )}
               </div>
@@ -2397,7 +2389,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setShowSirenConfirmModal(false);
-                  const chosenAudio = selectedEmergencyAudio || emergencyAudios[0]?.filename || 'sirine_ews_test.wav';
+                  const chosenAudio = selectedEmergencyAudio || settings.siren_audio_filename || emergencyAudios[0]?.filename || 'sirine_ews_test.wav';
                   handlePlayFilenameToSpeakers(chosenAudio);
                 }}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-all cursor-pointer"
@@ -3140,52 +3132,134 @@ export default function App() {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: PENGATURAN JARINGAN MULTICAST                      */}
+      {/* MODAL: PENGATURAN SISTEM & TOMBOL CEPAT                   */}
       {/* ========================================================= */}
       {showSettings && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
-            <div className="flex items-center justify-between mb-3.5">
-              <h3 className="text-base font-semibold text-slate-900">Pengaturan Jaringan</h3>
-              <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Settings className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">Pengaturan Sistem</h3>
+                  <p className="text-[11px] text-slate-500">Sesuaikan audio tombol cepat dan jaringan</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowSettings(false)} 
+                className="text-slate-400 hover:text-slate-600 cursor-pointer p-1 rounded-lg hover:bg-slate-100 transition-colors"
+              >
                 <X className="w-4.5 h-4.5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveSettings} className="space-y-3.5">
+            <form onSubmit={handleSaveSettings} className="space-y-4">
+              {/* Seksi Tombol Cepat */}
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Alamat IP Multicast</label>
-                <input 
-                  type="text" 
-                  value={settings.multicast_ip || ''}
-                  onChange={e => setSettings({ ...settings, multicast_ip: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
-                />
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
+                  Audio Tombol Cepat
+                </label>
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                  {/* Pilihan Audio Sirine */}
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1 text-xs font-medium text-slate-700">
+                      <Siren className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Audio Tombol Sirine:</span>
+                    </div>
+                    <select
+                      value={settings.siren_audio_filename || 'sirine_ews_test.wav'}
+                      onChange={e => setSettings({ ...settings, siren_audio_filename: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-800 focus:ring-2 focus:ring-rose-500 outline-hidden"
+                    >
+                      <optgroup label="Audio Darurat / Sirine">
+                        {audioList.filter(a => a.category === 'darurat').map(a => (
+                          <option key={a.id} value={a.filename}>
+                            {a.display_name} ({a.filename})
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Audio Biasa / Lainnya">
+                        {audioList.filter(a => a.category !== 'darurat').map(a => (
+                          <option key={a.id} value={a.filename}>
+                            {a.display_name} ({a.filename})
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  {/* Pilihan Audio K3 */}
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1 text-xs font-medium text-slate-700">
+                      <HardHat className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Audio Tombol K3:</span>
+                    </div>
+                    <select
+                      value={settings.k3_audio_filename || 'safety_k3_chime.wav'}
+                      onChange={e => setSettings({ ...settings, k3_audio_filename: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                    >
+                      <optgroup label="Audio Rekomendasi K3 / Biasa">
+                        {audioList.filter(a => a.category !== 'darurat').map(a => (
+                          <option key={a.id} value={a.filename}>
+                            {a.display_name} ({a.filename})
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Audio Darurat">
+                        {audioList.filter(a => a.category === 'darurat').map(a => (
+                          <option key={a.id} value={a.filename}>
+                            {a.display_name} ({a.filename})
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                </div>
               </div>
 
+              {/* Seksi Jaringan Multicast */}
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Port UDP Multicast</label>
-                <input 
-                  type="text" 
-                  value={settings.multicast_port || ''}
-                  onChange={e => setSettings({ ...settings, multicast_port: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
-                />
+                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
+                  Jaringan Speaker Fisik (RTP)
+                </label>
+                <div className="space-y-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Alamat IP Multicast</label>
+                    <input 
+                      type="text" 
+                      value={settings.multicast_ip || ''}
+                      onChange={e => setSettings({ ...settings, multicast_ip: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Port UDP Multicast</label>
+                    <input 
+                      type="text" 
+                      value={settings.multicast_port || ''}
+                      onChange={e => setSettings({ ...settings, multicast_port: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="pt-1.5 flex justify-end gap-2">
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
                 <button 
                   type="button" 
                   onClick={() => setShowSettings(false)}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100"
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 cursor-pointer"
                 >
-                  Tutup
+                  Batal
                 </button>
                 <button 
                   type="submit" 
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-xs"
+                  className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer"
                 >
-                  Simpan
+                  Simpan Pengaturan
                 </button>
               </div>
             </form>

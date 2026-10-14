@@ -165,7 +165,9 @@ def init_db():
             "multicast_port": "5004",
             "enable_multicast": "true",
             "enable_local": "false",
-            "local_volume": "100"
+            "local_volume": "100",
+            "siren_audio_filename": "sirine_ews_test.wav",
+            "k3_audio_filename": "safety_k3_chime.wav"
         }
         for k, v in defaults.items():
             cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
