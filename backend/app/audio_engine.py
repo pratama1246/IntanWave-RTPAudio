@@ -149,31 +149,43 @@ class AudioEngine:
         if self.enable_multicast:
             rtp_list = rtp_endpoints if rtp_endpoints is not None else [f"{mc_ip}:{mc_port}"]
 
-        net_cmd_args = None
-        if len(rtp_list) == 1 and not use_http:
-            net_cmd_args = [
-                "-af", "aresample=8000:async=1,asetnsamples=n=160",
-                "-acodec", "pcm_alaw",
-                "-ac", "1",
-                "-f", "rtp", f"rtp://{rtp_list[0]}?pkt_size=172"
-            ]
-        elif rtp_list or use_http:
-            # tee muxer: beberapa output sekaligus dari satu decode (clock sama persis)
-            shared_ssrc = random.randint(1, 2**31 - 1)
-            slaves = [
-                f"[select=a:f=rtp:ssrc={shared_ssrc}:seq=0]rtp://{ep}?pkt_size=172"
-                for ep in rtp_list
-            ]
-            if use_http:
-                # A-law mentah 20ms per chunk, di-flush per paket supaya latensi minimal
-                slaves.append("[select=a:f=alaw:flush_packets=1]pipe:1")
-            net_cmd_args = [
-                "-af", "aresample=8000:async=1,asetnsamples=n=160",
+        net_cmd_args = []
+        if rtp_list:
+            if len(rtp_list) == 1:
+                net_cmd_args.extend([
+                    "-map", "0:a",
+                    "-af", "aresample=8000:async=1,asetnsamples=n=160",
+                    "-c:a", "pcm_alaw",
+                    "-ac", "1",
+                    "-f", "rtp", f"rtp://{rtp_list[0]}?pkt_size=172"
+                ])
+            else:
+                # tee muxer: beberapa output RTP sekaligus dengan SSRC sinkron
+                shared_ssrc = random.randint(1, 2**31 - 1)
+                slaves = [
+                    f"[select=a:f=rtp:ssrc={shared_ssrc}:seq=0]rtp://{ep}?pkt_size=172"
+                    for ep in rtp_list
+                ]
+                net_cmd_args.extend([
+                    "-map", "0:a",
+                    "-af", "aresample=8000:async=1,asetnsamples=n=160",
+                    "-c:a", "pcm_alaw",
+                    "-ac", "1",
+                    "-f", "tee", "|".join(slaves)
+                ])
+
+        if use_http:
+            # Dual-Stream HD: 44.1kHz 16-bit PCM mono (882 sample / 1764 byte per 20ms)
+            # Jernih selevel CD untuk PC client, zero-buffer, zero-latency
+            net_cmd_args.extend([
                 "-map", "0:a",
-                "-c:a", "pcm_alaw",
+                "-af", "aresample=44100:async=1,asetnsamples=n=882",
+                "-c:a", "pcm_s16le",
                 "-ac", "1",
-                "-f", "tee", "|".join(slaves)
-            ]
+                "-f", "s16le",
+                "-flush_packets", "1",
+                "pipe:1"
+            ])
 
         if net_cmd_args:
             net_cmd = [
@@ -236,10 +248,10 @@ class AudioEngine:
             cmd = [
                 "ffmpeg", "-re", "-y",
                 "-i", str(chime_path.resolve()),
-                "-af", "aresample=8000:async=1,asetnsamples=n=160",
-                "-c:a", "pcm_alaw",
+                "-af", "aresample=44100:async=1,asetnsamples=n=882",
+                "-c:a", "pcm_s16le",
                 "-ac", "1",
-                "-f", "alaw", "-flush_packets", "1",
+                "-f", "s16le", "-flush_packets", "1",
                 "pipe:1"
             ]
             try:
@@ -254,18 +266,18 @@ class AudioEngine:
                 def _pump():
                     try:
                         while True:
-                            chunk = proc.stdout.read(160)
+                            chunk = proc.stdout.read(1764)
                             if not chunk:
                                 break
                             stream_hub.publish(chunk)
                     finally:
                         stream_hub.end()
                 threading.Thread(target=_pump, daemon=True).start()
-                log_event("TEST_AUDIO", f"Mengirimkan uji suara HTTP ke PC Node {target_node} ({ip})")
+                log_event("TEST_AUDIO", f"Mengirimkan uji suara HD ke PC Node {target_node} ({ip})")
                 return
             except Exception as e:
                 stream_hub.end()
-                log_event("TEST_AUDIO_ERROR", f"Gagal uji suara HTTP ke PC Node {target_node}: {e}", level="ERROR")
+                log_event("TEST_AUDIO_ERROR", f"Gagal uji suara HD ke PC Node {target_node}: {e}", level="ERROR")
                 raise e
 
         # Target adalah speaker fisik (RTP)
@@ -355,10 +367,10 @@ class AudioEngine:
 
     @staticmethod
     def _pump_stream(proc):
-        """Baca A-law mentah dari stdout FFmpeg (per ~20ms) lalu bagikan ke semua client HTTP."""
+        """Baca PCM 16-bit 44.1kHz dari stdout FFmpeg (1764 byte per ~20ms) lalu bagikan ke semua client HTTP/WS."""
         try:
             while True:
-                chunk = proc.stdout.read(160)
+                chunk = proc.stdout.read(1764)
                 if not chunk:
                     break
                 stream_hub.publish(chunk)

@@ -478,7 +478,7 @@ async def node_heartbeat(req: NodeHeartbeatRequest, request: Request):
 @app.get("/api/stream")
 async def stream_live(request: Request, node_id: str = ""):
     """
-    Stream audio live (G.711 A-law 8kHz mono, mentah) untuk PC client Windows.
+    Stream audio live (PCM 16-bit 44.1kHz mono, mentah) untuk PC client Windows.
     Koneksi dibiarkan terbuka; data hanya mengalir saat ada siaran yang menarget node ini.
     """
     node_id = (node_id or "").strip()
@@ -509,7 +509,7 @@ async def stream_live(request: Request, node_id: str = ""):
     return StreamingResponse(
         gen(),
         media_type="application/octet-stream",
-        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Audio-Format": "alaw;rate=8000;ch=1"},
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Audio-Format": "s16le;rate=44100;ch=1"},
     )
 
 @app.websocket("/ws/node/{node_id}")

@@ -452,15 +452,24 @@ class AudioReceiver:
         if self.on_status_change:
             self.on_status_change(new_status, self.current_category, self.current_title)
 
-    def _start_player(self, codec="alaw"):
+    def _start_player(self, codec="s16le", sample_rate=44100):
         """Menjalankan ffplay dengan konfigurasi ultra-low latency via pipe stdin."""
         if self.player_proc is not None and self.player_proc.poll() is None:
-            if self.player_codec == codec:
+            if self.player_codec == codec and getattr(self, "player_sample_rate", None) == sample_rate:
                 return
             self._close_player()
 
         vol = max(0, min(100, int(self.config.get("volume", 100))))
-        codec_fmt = "mulaw" if codec == "mulaw" else "alaw"
+        if codec == "s16le":
+            codec_fmt = "s16le"
+            sr_str = str(sample_rate or 44100)
+        elif codec == "mulaw":
+            codec_fmt = "mulaw"
+            sr_str = "8000"
+        else:
+            codec_fmt = "alaw"
+            sr_str = "8000"
+
         cmd = [
             get_ffplay_bin(),
             "-nodisp",
@@ -472,7 +481,7 @@ class AudioReceiver:
             "-flags", "low_delay",
             "-volume", str(vol),
             "-f", codec_fmt,
-            "-sample_rate", "8000",
+            "-sample_rate", sr_str,
             "-ch_layout", "mono",
             "-i", "-"
         ]
@@ -485,6 +494,7 @@ class AudioReceiver:
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
             )
             self.player_codec = codec
+            self.player_sample_rate = sample_rate
             self.prebuf = []
             self.prebuf_ready = False
         except Exception as e:
@@ -536,6 +546,8 @@ class AudioReceiver:
                 except Exception:
                     pass
             self.player_proc = None
+            self.player_codec = None
+            self.player_sample_rate = None
 
         self.current_category = "biasa"
         self.current_title = ""
@@ -715,10 +727,10 @@ class AudioReceiver:
 
                         if self.active_source != "WS":
                             self.active_source = "WS"
-                            self.set_status("STREAMING", "biasa", "Siaran Server PA")
-                            self.notify_toast("IntanWave — Siaran Server", f"Menerima siaran audio dari {self.server_url}")
+                            self.set_status("STREAMING", "biasa", "Siaran Server PA (HD)")
+                            self.notify_toast("IntanWave — Siaran Server (HD)", f"Menerima siaran audio HD dari {self.server_url}")
                             threading.Thread(target=self._fetch_playback_info, daemon=True).start()
-                            self._start_player("alaw")
+                            self._start_player("s16le", 44100)
 
                         self.last_audio_time = now_audio
                         self._feed_player(payload)
@@ -875,7 +887,7 @@ class AudioReceiver:
             self.set_status("STREAMING", "darurat", ch_name)
             self.notify_toast(f"IntanWave — {ch_name}", f"Menerima panggilan siaran dari {addr[0]}")
             codec = "mulaw" if pt == 0 else "alaw"
-            self._start_player(codec)
+            self._start_player(codec, 8000)
 
         self.last_audio_time = now
         self._feed_player(payload)
