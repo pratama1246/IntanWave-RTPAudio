@@ -257,28 +257,6 @@ class IntanWaveNodeWindow:
         self.entry_zone.insert(0, ", ".join(self.receiver.groups))
         self.entry_zone.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
-        ttk.Label(srv_grid, text="Volume Siaran:").grid(row=3, column=0, sticky=tk.W, pady=3)
-        vol_frame = ttk.Frame(srv_grid)
-        vol_frame.grid(row=3, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
-
-        self.var_volume = tk.IntVar(value=int(self.receiver.config.get("volume", 21)))
-        self.lbl_volume_val = ttk.Label(vol_frame, text=f"{self.var_volume.get()}%", width=5)
-
-        def _on_slider(val):
-            v = int(round(float(val)))
-            self.var_volume.set(v)
-            self.lbl_volume_val.config(text=f"{v}%")
-
-        self.slider_volume = ttk.Scale(
-            vol_frame,
-            from_=1,
-            to=100,
-            variable=self.var_volume,
-            command=_on_slider
-        )
-        self.slider_volume.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
-        self.lbl_volume_val.pack(side=tk.RIGHT)
-
         # 3. Form Channel IP Phone Darurat (Opsional)
         cfg_frame = ttk.LabelFrame(main_frame, text=" Channel Telepon Darurat (Opsional) ", padding="12 10 12 10")
         cfg_frame.pack(fill=tk.X, pady=(0, 10))
@@ -365,7 +343,6 @@ class IntanWaveNodeWindow:
         new_name = self.entry_name.get().strip()
         new_zone = self.entry_zone.get().strip()
         new_sec = self.entry_secondary_ip.get().strip()
-        val_vol = max(1, min(100, int(self.var_volume.get())))
 
         if not new_server:
             messagebox.showwarning("Peringatan", "URL Server PA Audio tidak boleh kosong.", parent=self.root)
@@ -381,11 +358,11 @@ class IntanWaveNodeWindow:
         if self.var_startup.get() != is_startup_enabled():
             set_startup_enabled(self.var_startup.get())
 
-        self.receiver.save_config(new_server, new_name, new_zone, secondary_channel=new_sec, volume=val_vol)
+        self.receiver.save_config(new_server, new_name, new_zone, secondary_channel=new_sec)
         sec_msg = f"\nIP Phone: rtp://{new_sec}" if new_sec else ""
         messagebox.showinfo(
             "Berhasil", 
-            f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}\nVolume Siaran: {val_vol}%{sec_msg}",
+            f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}{sec_msg}",
             parent=self.root
         )
 
