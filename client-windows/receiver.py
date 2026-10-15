@@ -1176,6 +1176,15 @@ class AudioReceiver:
                 pass
 
         is_server = (addr[0] == server_host) or (addr[0] == self.multicast_ip)
+        # Proteksi Anti-Dobel / Anti-Dengung:
+        # Jika paket UDP berasal dari Server PA:
+        # 1. Jika sedang memutar audio lokal (LOCAL/cache), abaikan UDP server.
+        # 2. Jika mode adalah 'cache', abaikan UDP server (hanya gunakan trigger).
+        # 3. Jika client tersambung via WebSocket server, abaikan UDP server (karena server sudah mengirim via WS/cache).
+        if is_server:
+            if self.active_source == "LOCAL" or self.playback_mode == "cache" or self.server_connected:
+                return
+
         source_key = "RTP_SERVER" if is_server else "RTP_PHONE"
 
         if self.active_source != source_key:

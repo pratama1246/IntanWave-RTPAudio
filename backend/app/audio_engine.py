@@ -730,7 +730,7 @@ class AudioEngine:
             if not chime_path.exists():
                 raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
 
-        # Jika target adalah PC node, kirimkan trigger event juga
+        # Jika target adalah PC node, kirimkan trigger event saja (JANGAN kirim RTP UDP agar tidak dobel/dengung)
         node_by_ip = self._get_node_ip_map()
         target_nid = node_id or node_by_ip.get(ip)
         if target_nid:
@@ -745,6 +745,8 @@ class AudioEngine:
                 },
                 nodes={target_nid}
             )
+            log_event("TEST_AUDIO", f"Mengirimkan uji suara WebSocket trigger ke node PC {target_nid} ({ip})")
+            return
 
         rtp_url = f"rtp://{ip}:{port}?pkt_size=172"
         cmd = [
