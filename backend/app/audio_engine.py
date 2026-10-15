@@ -414,8 +414,10 @@ class AudioEngine:
             http_nodes=http_nodes
         )
 
-        # Kirim sinyal trigger JSON ke PC client nodes
-        if enable_multicast and (http_all or bool(http_nodes)):
+        use_http = enable_multicast and (http_all or bool(http_nodes))
+
+        # 1. Kirim sinyal trigger JSON ke PC client nodes (untuk mode Cache/Otomatis)
+        if use_http:
             stream_hub.publish_event(
                 {
                     "action": "play",
@@ -453,6 +455,22 @@ class AudioEngine:
                     "-f", "tee", "|".join(slaves)
                 ])
 
+        # 2. Pipe audio stream biner MP3 44.1kHz (untuk mode Direct Streaming / Uji Coba)
+        if use_http:
+            net_cmd_args.extend([
+                "-map", "0:a",
+                "-af", "aresample=44100:async=1",
+                "-c:a", "libmp3lame",
+                "-b:a", "128k",
+                "-ac", "1",
+                "-ar", "44100",
+                "-f", "mp3",
+                "-write_xing", "0",
+                "-id3v2_version", "0",
+                "-flush_packets", "1",
+                "pipe:1"
+            ])
+
         if net_cmd_args:
             net_cmd = [
                 "ffmpeg", "-re", "-y",
@@ -460,13 +478,26 @@ class AudioEngine:
                 *net_cmd_args
             ]
             try:
+                if use_http:
+                    stream_hub.begin(all_nodes=http_all, nodes=http_nodes)
                 session.multicast_proc = subprocess.Popen(
                     net_cmd,
-                    stdout=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE if use_http else subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    bufsize=0 if use_http else -1,
                     creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
                 )
+                if use_http:
+                    t_pump = threading.Thread(
+                        target=self._pump_session_stream,
+                        args=(session,),
+                        daemon=True
+                    )
+                    session.pump_thread = t_pump
+                    t_pump.start()
             except Exception as e:
+                if use_http:
+                    stream_hub.end(all_nodes=http_all, nodes=http_nodes)
                 log_event("RTP_ERROR", f"Gagal menjalankan ffmpeg stream sesi {session_id}: {e}", level="ERROR")
 
         if enable_local:
@@ -496,6 +527,29 @@ class AudioEngine:
 
         log_event("PLAYBACK_STARTED", f"Memutar '{title}' -> {target_desc} (P{priority}, Sesi={session_id})")
         return session_id
+
+    def _pump_session_stream(self, session: PlaybackSession):
+        """Membaca MP3 dari stdout FFmpeg sesi ini dan membagikan secara spesifik ke node targetnya."""
+        proc = session.multicast_proc
+        if not proc or not proc.stdout:
+            return
+        try:
+            while not session.stop_event.is_set():
+                chunk = proc.stdout.read(4096)
+                if not chunk:
+                    break
+                stream_hub.publish(
+                    chunk,
+                    all_nodes=session.http_all,
+                    nodes=session.http_nodes
+                )
+        except Exception:
+            pass
+        finally:
+            stream_hub.end(
+                all_nodes=session.http_all,
+                nodes=session.http_nodes
+            )
 
     def _monitor_session(self, session: PlaybackSession):
         """Thread background pemantau progres dan deteksi selesainya sesi pemutaran tertentu."""
@@ -566,6 +620,7 @@ class AudioEngine:
                         pass
         session.multicast_proc = None
         session.local_proc = None
+        stream_hub.end(all_nodes=session.http_all, nodes=session.http_nodes)
 
     def _process_queue_locked(self):
         """Mengecek antrean playback dan menjalankan item yang speaker targetnya sudah bebas."""
@@ -673,6 +728,22 @@ class AudioEngine:
             chime_path = AUDIO_DIR / "test_chime.wav"
             if not chime_path.exists():
                 raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
+
+        # Jika target adalah PC node, kirimkan trigger event juga
+        node_by_ip = self._get_node_ip_map()
+        target_nid = node_id or node_by_ip.get(ip)
+        if target_nid:
+            stream_hub.publish_event(
+                {
+                    "action": "play",
+                    "session_id": f"test_{uuid.uuid4().hex[:6]}",
+                    "filename": "test_chime.wav",
+                    "title": "Uji Suara Speaker",
+                    "category": "biasa",
+                    "duration": 2.0
+                },
+                nodes={target_nid}
+            )
 
         rtp_url = f"rtp://{ip}:{port}?pkt_size=172"
         cmd = [

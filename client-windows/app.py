@@ -258,6 +258,25 @@ class IntanWaveNodeWindow:
         self.entry_zone.insert(0, ", ".join(self.receiver.groups))
         self.entry_zone.grid(row=2, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
 
+        ttk.Label(srv_grid, text="Mode Audio:").grid(row=3, column=0, sticky=tk.W, pady=3)
+        self.combo_mode = ttk.Combobox(
+            srv_grid,
+            values=[
+                "Otomatis (Hybrid Cache + Stream Fallback)",
+                "Hybrid Cache (Kualitas Penuh, Anti-Lag)",
+                "Direct Streaming (Uji Coba Stream Real-time)"
+            ],
+            state="readonly"
+        )
+        mode_val = getattr(self.receiver, "playback_mode", "auto")
+        if mode_val == "cache":
+            self.combo_mode.current(1)
+        elif mode_val == "stream":
+            self.combo_mode.current(2)
+        else:
+            self.combo_mode.current(0)
+        self.combo_mode.grid(row=3, column=1, sticky=tk.EW, padx=(8, 0), pady=3)
+
         # 3. Form Channel IP Phone Darurat (Opsional)
         cfg_frame = ttk.LabelFrame(main_frame, text=" Channel Telepon Darurat (Opsional) ", padding="12 10 12 10")
         cfg_frame.pack(fill=tk.X, pady=(0, 10))
@@ -417,11 +436,19 @@ class IntanWaveNodeWindow:
         if self.var_startup.get() != is_startup_enabled():
             set_startup_enabled(self.var_startup.get())
 
-        self.receiver.save_config(new_server, new_name, new_zone, secondary_channel=new_sec)
+        idx = self.combo_mode.current()
+        selected_mode = "auto"
+        if idx == 1:
+            selected_mode = "cache"
+        elif idx == 2:
+            selected_mode = "stream"
+
+        self.receiver.save_config(new_server, new_name, new_zone, secondary_channel=new_sec, playback_mode=selected_mode)
         sec_msg = f"\nIP Phone: rtp://{new_sec}" if new_sec else ""
+        mode_label = self.combo_mode.get()
         messagebox.showinfo(
             "Berhasil", 
-            f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}{sec_msg}",
+            f"Konfigurasi disimpan!\nNode mendaftar ke: {new_server}\nGroup: {new_zone}\nMode: {mode_label}{sec_msg}",
             parent=self.root
         )
 

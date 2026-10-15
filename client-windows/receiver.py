@@ -106,6 +106,7 @@ class AudioReceiver:
         self.status = "STANDBY"  # STANDBY | STREAMING
         self.current_category = "biasa"  # biasa | darurat
         self.current_title = ""
+        self.playback_mode = self.config.get("playback_mode", "auto")  # "auto" | "cache" | "stream"
         self.is_running = False
         self.on_status_change = on_status_change
         self.on_heartbeat_change = on_heartbeat_change
@@ -255,6 +256,9 @@ class AudioReceiver:
                 }
             ]
             changed = True
+        if "playback_mode" not in cfg:
+            cfg["playback_mode"] = "auto"
+            changed = True
         if "enable_toast" not in cfg:
             cfg["enable_toast"] = True
             changed = True
@@ -268,10 +272,12 @@ class AudioReceiver:
                 pass
         return cfg
 
-    def save_config(self, server_url, device_name, groups_or_zone, ip=None, port=None, secondary_channel="", **kwargs):
+    def save_config(self, server_url, device_name, groups_or_zone, ip=None, port=None, secondary_channel="", playback_mode="auto", **kwargs):
         """Menyimpan konfigurasi baru, me-restart listeners, dan mengirim heartbeat pembaruan ke server."""
         self.server_url = server_url.strip().rstrip("/")
         self.device_name = device_name.strip()
+        if playback_mode:
+            self.playback_mode = playback_mode.strip()
         if isinstance(groups_or_zone, str):
             self.groups = [g.strip() for g in groups_or_zone.split(",") if g.strip()]
         elif isinstance(groups_or_zone, list):
@@ -314,6 +320,7 @@ class AudioReceiver:
             "multicast_ip": self.multicast_ip,
             "multicast_port": self.multicast_port,
             "channels": self.channels,
+            "playback_mode": self.playback_mode,
             "enable_toast": self.config.get("enable_toast", True)
         }
         self.config = data
@@ -976,28 +983,43 @@ class AudioReceiver:
                                 action = data.get("action")
                                 msg_type = data.get("type")
                                 if action == "play":
-                                    self._handle_play_event(data)
+                                    if self.playback_mode == "stream":
+                                        pass
+                                    elif self.playback_mode == "cache":
+                                        self._handle_play_event(data)
+                                    else:
+                                        self._handle_play_event(data)
                                 elif action == "stop":
                                     self._handle_stop_event(data)
+                                    if self.active_source == "WS":
+                                        self._on_stream_end()
                                 elif msg_type in ("schedules_update", "audio_update"):
                                     self.sync_schedules_and_media(force=True)
                                 elif msg_type == "stream_end":
-                                    self._on_stream_end()
+                                    if self.active_source == "WS":
+                                        self._on_stream_end()
                             elif "stream_end" in text_msg:
-                                self._on_stream_end()
+                                if self.active_source == "WS":
+                                    self._on_stream_end()
                         except Exception:
                             pass
 
                     # Opcode 0x2: Biner Audio Frame
                     elif opcode == 0x2:
+                        if self.active_source == "LOCAL":
+                            continue
+
+                        if self.playback_mode == "cache":
+                            continue
+
                         now_audio = time.time()
                         if self.active_source == "RTP" and (now_audio - self.last_audio_time < 2.5):
                             continue
 
                         if self.active_source != "WS":
                             self.active_source = "WS"
-                            self.set_status("STREAMING", "biasa", "Siaran Server PA (HD)")
-                            self.notify_toast("IntanWave — Siaran Server (HD)", f"Menerima siaran audio HD dari {self.server_url}")
+                            self.set_status("STREAMING", "biasa", "Siaran Server PA (Stream Live)")
+                            self.notify_toast("IntanWave — Siaran Server (Live Stream)", f"Menerima streaming audio langsung dari {self.server_url}")
                             threading.Thread(target=self._fetch_playback_info, daemon=True).start()
                             self._start_player("mp3", 44100)
 
