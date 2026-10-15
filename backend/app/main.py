@@ -63,7 +63,7 @@ class ConnectionManager:
     async def broadcast(self, data: dict):
         for conn in list(self.active_connections):
             try:
-                await conn.send_json(data)
+                await asyncio.wait_for(conn.send_json(data), timeout=0.8)
             except Exception:
                 self.disconnect(conn)
 
@@ -493,19 +493,25 @@ async def node_heartbeat(req: NodeHeartbeatRequest, request: Request):
         force_update=bool(req.force_update)
     )
 
-    # Broadcast pembaruan speaker & group seketika ke Web Dashboard
-    await manager.broadcast({
-        "type": "speakers_update",
-        "speakers": get_all_speakers()
-    })
-    await manager.broadcast({
-        "type": "groups_update",
-        "groups": get_all_groups()
-    })
-    await manager.broadcast({
-        "type": "zones_update",
-        "zones": get_all_groups()
-    })
+    # Broadcast pembaruan speaker & group secara asinkron ke Web Dashboard agar tidak memblok response client
+    async def _async_broadcast_updates():
+        try:
+            await manager.broadcast({
+                "type": "speakers_update",
+                "speakers": get_all_speakers()
+            })
+            await manager.broadcast({
+                "type": "groups_update",
+                "groups": get_all_groups()
+            })
+            await manager.broadcast({
+                "type": "zones_update",
+                "zones": get_all_groups()
+            })
+        except Exception:
+            pass
+
+    asyncio.create_task(_async_broadcast_updates())
 
     return {
         "status": "ok",
