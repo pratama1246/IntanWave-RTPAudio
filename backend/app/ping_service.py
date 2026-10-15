@@ -62,7 +62,7 @@ async def check_speaker(speaker: Dict[str, Any]) -> Dict[str, Any]:
                 pass
         status = "online" if is_online else "offline"
         latency = 1 if is_online else 0
-        update_speaker_status(speaker["id"], status, latency)
+        update_speaker_status(speaker["id"], status, latency, is_node=True)
 
         speaker_copy = dict(speaker)
         speaker_copy["status"] = status

@@ -345,15 +345,22 @@ def delete_speaker(speaker_id: int):
         conn.execute("DELETE FROM speakers WHERE id = ?", (speaker_id,))
         conn.commit()
 
-def update_speaker_status(speaker_id: int, status: str, latency_ms: int = 0):
+def update_speaker_status(speaker_id: int, status: str, latency_ms: int = 0, is_node: bool = False):
     with get_db() as conn:
         now = datetime.now().isoformat()
         if status == "online":
-            conn.execute("""
-                UPDATE speakers 
-                SET status = ?, latency_ms = ?, last_online = ?, last_checked = ? 
-                WHERE id = ?
-            """, (status, latency_ms, now, now, speaker_id))
+            if is_node:
+                conn.execute("""
+                    UPDATE speakers 
+                    SET status = ?, latency_ms = ?, last_checked = ? 
+                    WHERE id = ?
+                """, (status, latency_ms, now, speaker_id))
+            else:
+                conn.execute("""
+                    UPDATE speakers 
+                    SET status = ?, latency_ms = ?, last_online = ?, last_checked = ? 
+                    WHERE id = ?
+                """, (status, latency_ms, now, now, speaker_id))
         else:
             conn.execute("""
                 UPDATE speakers 

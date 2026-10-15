@@ -711,7 +711,7 @@ async def ping_single_speaker(speaker_id: int):
         is_online, latency = await ping_ip(sp["ip_address"])
         status = "online" if is_online else "offline"
 
-    update_speaker_status(speaker_id, status, latency)
+    update_speaker_status(speaker_id, status, latency, is_node=(sp.get("device_type") == "node"))
     updated = get_speaker_by_id(speaker_id)
     await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
     return {"online": is_online, "latency_ms": latency, "speaker": updated}
