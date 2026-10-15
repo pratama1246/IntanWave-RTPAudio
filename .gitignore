@@ -41,3 +41,5 @@ backend/storage/audio/*.mp3
 .gemini/
 .DS_Store
 Thumbs.db
+client-windows/media/
+dist/IntanWave-Node/media/
