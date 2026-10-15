@@ -127,6 +127,7 @@ class AudioReceiver:
         self.active_source = None  # None | "HTTP" | "RTP"
         self.last_audio_time = 0.0
         self.last_toast_time = 0.0
+        self.stream_stopped = False
 
         # Koneksi Jaringan
         self.stream_sock = None
@@ -659,9 +660,13 @@ class AudioReceiver:
         with self.player_lock:
             if session_id and self.active_session_id and session_id != self.active_session_id:
                 return
+            self.stream_stopped = True
             self._stop_local_player_locked()
+            self._close_player()
             self.active_session_id = None
             self.active_source = None
+            self.prebuf = []
+            self.prebuf_ready = False
             self.set_status("STANDBY", "biasa", "")
             self._start_player("alaw", 8000)
 
@@ -678,38 +683,33 @@ class AudioReceiver:
                     pass
             self.local_player_proc = None
 
+    def _on_ws_stream_start(self, data: dict):
+        """Menangani inisialisasi streaming langsung via WebSocket."""
+        with self.player_lock:
+            self.stream_stopped = False
+            title = data.get("title") or "Siaran Server PA (Stream Live)"
+            category = data.get("category") or "biasa"
+            self.active_session_id = data.get("session_id")
+            self.active_source = "WS"
+            self.set_status("STREAMING", category, title)
+            self.notify_toast("IntanWave — Siaran Server (Live Stream)", f"Menerima streaming audio langsung dari {self.server_url}")
+            self._start_player("mp3", 44100)
+
     def _on_stream_end(self):
         """
         Menangani akhir siaran audio secara mulus:
-        1. Flush sisa prebuffer jika ada ke player stdin.
-        2. Kembalikan status ke STANDBY.
-        3. Pastikan audio player tetap pre-warmed dalam mode G.711 A-law 8kHz untuk siaran berikutnya.
+        1. Kembalikan status ke STANDBY.
+        2. Tutup proses player lama dan bersihkan buffer.
+        3. Pastikan audio player pre-warmed dalam mode G.711 A-law 8kHz untuk siaran berikutnya.
         """
-        if self.status != "STREAMING" and self.active_source is None:
-            return
-
-        if self.player_proc and self.player_proc.stdin and self.player_proc.poll() is None:
-            try:
-                if self.prebuf:
-                    self.player_proc.stdin.write(b"".join(self.prebuf))
-                    self.player_proc.stdin.flush()
-                # Jika codec PCM/G.711 (misal setelah panggilan IP Phone RTP), tulis padding silence
-                if self.player_codec in ("s16le", "alaw", "mulaw"):
-                    silence_len = 3528 if self.player_codec == "s16le" else 320
-                    silence_val = b"\x00" if self.player_codec != "alaw" else b"\xd5"
-                    self.player_proc.stdin.write(silence_val * silence_len)
-                    self.player_proc.stdin.flush()
-            except Exception:
-                pass
-
-        self.prebuf = []
-        self.prebuf_ready = False
-        self.active_source = None
-        self.set_status("STANDBY", "biasa", "")
-
-        # Restart player standby agar fresh dan pre-warmed dalam mode G.711 A-law 8kHz
-        self._close_player()
-        self._start_player("alaw", 8000)
+        self.stream_stopped = True
+        with self.player_lock:
+            self._close_player()
+            self.prebuf = []
+            self.prebuf_ready = False
+            self.active_source = None
+            self.set_status("STANDBY", "biasa", "")
+            self._start_player("alaw", 8000)
 
     def _start_player(self, codec="alaw", sample_rate=8000):
         """Menjalankan ffplay dengan konfigurasi ultra-low latency via pipe stdin."""
@@ -720,16 +720,20 @@ class AudioReceiver:
 
         if codec == "mp3":
             codec_fmt = "mp3"
-            probesize_val = "2048"
+            probesize_val = "32768"
+            analyzeduration_val = "500000"
         elif codec == "s16le":
             codec_fmt = "s16le"
             probesize_val = "32"
+            analyzeduration_val = "0"
         elif codec == "mulaw":
             codec_fmt = "mulaw"
             probesize_val = "32"
+            analyzeduration_val = "0"
         else:
             codec_fmt = "alaw"
             probesize_val = "32"
+            analyzeduration_val = "0"
 
         cmd = [
             get_ffplay_bin(),
@@ -737,7 +741,7 @@ class AudioReceiver:
             "-autoexit",
             "-loglevel", "quiet",
             "-probesize", probesize_val,
-            "-analyzeduration", "0",
+            "-analyzeduration", analyzeduration_val,
             "-fflags", "nobuffer",
             "-flags", "low_delay",
             "-volume", "100",
@@ -993,29 +997,33 @@ class AudioReceiver:
                                 action = data.get("action")
                                 msg_type = data.get("type")
                                 if action == "play":
+                                    self.stream_stopped = False
                                     if self.playback_mode == "stream":
-                                        pass
+                                        self._on_ws_stream_start(data)
                                     elif self.playback_mode == "cache":
                                         self._handle_play_event(data)
                                     else:
                                         self._handle_play_event(data)
                                 elif action == "stop":
+                                    self.stream_stopped = True
                                     self._handle_stop_event(data)
-                                    if self.active_source == "WS":
-                                        self._on_stream_end()
+                                    self._on_stream_end()
                                 elif msg_type in ("schedules_update", "audio_update"):
                                     self.sync_schedules_and_media(force=True)
                                 elif msg_type == "stream_end":
-                                    if self.active_source == "WS":
-                                        self._on_stream_end()
-                            elif "stream_end" in text_msg:
-                                if self.active_source == "WS":
+                                    self.stream_stopped = True
                                     self._on_stream_end()
+                            elif "stream_end" in text_msg:
+                                self.stream_stopped = True
+                                self._on_stream_end()
                         except Exception:
                             pass
 
                     # Opcode 0x2: Biner Audio Frame
                     elif opcode == 0x2:
+                        if getattr(self, "stream_stopped", False):
+                            continue
+
                         if self.active_source == "LOCAL":
                             continue
 

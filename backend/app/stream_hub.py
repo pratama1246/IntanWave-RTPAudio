@@ -104,11 +104,11 @@ class StreamHub:
 
     @staticmethod
     def _end_sub(q: asyncio.Queue):
-        if q.full():
+        while not q.empty():
             try:
                 q.get_nowait()
             except asyncio.QueueEmpty:
-                pass
+                break
         q.put_nowait(b"STREAM_END")
 
     @staticmethod
