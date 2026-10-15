@@ -684,6 +684,7 @@ class AudioEngine:
                 self._cleanup_session_procs(s)
             self.active_sessions.clear()
             self.playback_queue.clear()
+            stream_hub.publish_event({"action": "stop", "reason": "GLOBAL_STOP"}, all_nodes=True)
             stream_hub.end(all_nodes=True)
 
             self.status = "IDLE"

@@ -590,9 +590,15 @@ class AudioReceiver:
             return
 
         target_file = self.media_dir / filename
-        # Jika file belum ada di cache, unduh seketika
+        # Jika file belum ada di cache, periksa direktori bundle lokal sebelum mengunduh
         if not target_file.exists() or target_file.stat().st_size == 0:
-            self._download_media_file(filename)
+            alt_local = BUNDLE_DIR / filename
+            if not alt_local.exists():
+                alt_local = EXE_DIR / filename
+            if alt_local.exists() and alt_local.is_file():
+                target_file = alt_local
+            else:
+                self._download_media_file(filename)
 
         if not target_file.exists():
             print(f"[!] Berkas audio '{filename}' tidak ditemukan di media cache.")
