@@ -47,7 +47,7 @@ class StreamHub:
                 ]
             else:
                 subs = []
-        for _, loop, q in subs:
+        for loop, q in subs:
             self._call(loop, self._flush, q)
 
     def end(self, all_nodes: bool = False, nodes: Optional[Set[str]] = None):
@@ -62,7 +62,7 @@ class StreamHub:
                 ]
             else:
                 subs = []
-        for _, loop, q in subs:
+        for loop, q in subs:
             self._call(loop, self._end_sub, q)
 
     def publish(self, chunk: bytes, all_nodes: bool = False, nodes: Optional[Set[str]] = None):
