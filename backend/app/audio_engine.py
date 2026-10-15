@@ -245,22 +245,30 @@ class AudioEngine:
             mc_ep = f"{mc_ip}:{mc_port}"
             rtp_endpoints = list(dict.fromkeys(target_endpoints)) if target_endpoints else None
             if rtp_endpoints is None or mc_ep in rtp_endpoints:
-                http_all = True
-                footprint.add("ALL_HTTP")
                 footprint.add("ALL_RTP")
-                rtp_list = [mc_ep]
+                destinations = [mc_ep]
+                try:
+                    with get_db() as conn:
+                        node_rows = conn.execute(
+                            "SELECT ip_address, port, node_id FROM speakers "
+                            "WHERE enabled = 1 AND device_type = 'node' AND ip_address NOT LIKE 'pending-%'"
+                        ).fetchall()
+                    for nr in node_rows:
+                        destinations.append(f"{nr['ip_address']}:{nr['port']}")
+                        footprint.add(f"node:{nr['node_id']}")
+                except Exception:
+                    pass
+                rtp_list = list(dict.fromkeys(destinations))
             else:
                 kept = []
                 for ep in rtp_endpoints:
+                    kept.append(ep)
                     ip = ep.split(":")[0]
                     if ip in node_by_ip:
-                        nid = node_by_ip[ip]
-                        http_nodes.add(nid)
-                        footprint.add(f"node:{nid}")
+                        footprint.add(f"node:{node_by_ip[ip]}")
                     else:
-                        kept.append(ep)
                         footprint.add(f"rtp:{ep}")
-                rtp_list = kept
+                rtp_list = list(dict.fromkeys(kept))
 
         if enable_local:
             footprint.add("LOCAL")
@@ -677,7 +685,7 @@ class AudioEngine:
             return False
 
     def test_speaker_audio(self, ip: str, port: int = 5004, node_id: Optional[str] = None):
-        """Memutar jingle test pendek langsung ke satu speaker tertentu (RTP untuk speaker fisik, HTTP stream untuk PC Node)."""
+        """Memutar jingle test pendek langsung ke satu speaker tertentu via UDP RTP."""
         with self._lock:
             now = time.time()
             cooldown_key = f"{ip}:{node_id or ''}"
@@ -688,50 +696,6 @@ class AudioEngine:
             chime_path = AUDIO_DIR / "test_chime.wav"
             if not chime_path.exists():
                 raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
-
-        node_map = self._get_node_ip_map()
-        target_node = node_id or node_map.get(ip)
-
-        if target_node:
-            cmd = [
-                "ffmpeg", "-re", "-y",
-                "-i", str(chime_path.resolve()),
-                "-af", "aresample=44100:async=1",
-                "-c:a", "libmp3lame",
-                "-b:a", "128k",
-                "-ac", "1",
-                "-ar", "44100",
-                "-f", "mp3",
-                "-write_xing", "0",
-                "-id3v2_version", "0",
-                "-flush_packets", "1",
-                "pipe:1"
-            ]
-            try:
-                stream_hub.begin(all_nodes=False, nodes={target_node})
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    bufsize=0,
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-                )
-                def _pump():
-                    try:
-                        while True:
-                            chunk = proc.stdout.read(4096)
-                            if not chunk:
-                                break
-                            stream_hub.publish(chunk, all_nodes=False, nodes={target_node})
-                    finally:
-                        stream_hub.end(all_nodes=False, nodes={target_node})
-                threading.Thread(target=_pump, daemon=True).start()
-                log_event("TEST_AUDIO", f"Mengirimkan uji suara HD ke PC Node {target_node} ({ip})")
-                return
-            except Exception as e:
-                stream_hub.end(all_nodes=False, nodes={target_node})
-                log_event("TEST_AUDIO_ERROR", f"Gagal uji suara HD ke PC Node {target_node}: {e}", level="ERROR")
-                raise e
 
         rtp_url = f"rtp://{ip}:{port}?pkt_size=172"
         cmd = [
@@ -750,7 +714,7 @@ class AudioEngine:
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
             )
-            log_event("TEST_AUDIO", f"Mengirimkan uji suara RTP ke {ip}:{port}")
+            log_event("TEST_AUDIO", f"Mengirimkan uji suara UDP RTP ke {ip}:{port}")
         except Exception as e:
             log_event("TEST_AUDIO_ERROR", f"Gagal uji suara ke {ip}: {e}", level="ERROR")
             raise e
