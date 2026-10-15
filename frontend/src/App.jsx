@@ -678,7 +678,6 @@ export default function App() {
     zone: 'Kantor',
     device_type: 'physical'
   });
-  const [modalPingStatus, setModalPingStatus] = useState({ testing: false, result: null });
 
   // Settings State
   const [settings, setSettings] = useState({
@@ -1081,26 +1080,6 @@ export default function App() {
     return list;
   }, [groupsList, speakers]);
 
-  const currentTargetValue = useMemo(() => {
-    if (targetMode === 'group' || targetMode === 'zone') return `group:${selectedGroup}`;
-    if (targetMode === 'speaker') return `speaker:${selectedSpeakerId}`;
-    return 'all';
-  }, [targetMode, selectedGroup, selectedSpeakerId]);
-
-  const handleTargetChange = (val) => {
-    if (val === 'all') {
-      setTargetMode('all');
-    } else if (val.startsWith('group:') || val.startsWith('zone:')) {
-      const grpName = val.replace(/^(group:|zone:)/, '');
-      setTargetMode('group');
-      setSelectedGroup(grpName);
-    } else if (val.startsWith('speaker:')) {
-      const spId = parseInt(val.replace('speaker:', ''), 10);
-      setTargetMode('speaker');
-      setSelectedSpeakerId(spId);
-    }
-  };
-
   // Calculate Next Upcoming Alarm based on schedule_type and days_of_week
   const getNextScheduleInfo = () => {
     const active = schedules.filter(s => s.enabled);
@@ -1300,17 +1279,6 @@ export default function App() {
     }
   };
 
-  // Delete an item from playback queue
-  const handleDeleteQueueItem = async (queueId, e) => {
-    if (e) e.stopPropagation();
-    try {
-      await fetch(`/api/playback/queue/${queueId}`, { method: 'DELETE' });
-      fetchData();
-    } catch (err) {
-      console.error('Gagal menghapus antrean:', err);
-    }
-  };
-
   // Trigger Schedule Manually according to its own target
   const handleTriggerSchedule = async (schedule) => {
     if (isActionBusyRef.current || triggeringScheduleId) return;
@@ -1407,7 +1375,6 @@ export default function App() {
       zone: defaultGrp,
       device_type: 'physical'
     });
-    setModalPingStatus({ testing: false, result: null });
     setShowSpeakerModal(true);
   };
 
@@ -1425,7 +1392,6 @@ export default function App() {
       zone: grps[0] || 'Kantor',
       device_type: speaker.device_type || 'physical'
     });
-    setModalPingStatus({ testing: false, result: null });
     setShowSpeakerModal(true);
   };
 
@@ -1446,32 +1412,6 @@ export default function App() {
       groups: next,
       zone: next[0] || 'Kantor'
     }));
-  };
-
-  // Test Ping from inside Modal
-  const handleTestModalPing = async () => {
-    if (!speakerForm.ip_address) return;
-    setModalPingStatus({ testing: true, result: null });
-    try {
-      if (editingSpeaker) {
-        const res = await fetch(`/api/speakers/${editingSpeaker.id}/ping`, { method: 'POST' });
-        const data = await res.json();
-        setModalPingStatus({ 
-          testing: false, 
-          result: { online: data.online, latency: data.latency_ms } 
-        });
-      } else {
-        const res = await fetch('/api/speakers/scan', { method: 'POST' });
-        const data = await res.json();
-        const found = (data.speakers || []).find(s => s.ip_address === speakerForm.ip_address);
-        setModalPingStatus({ 
-          testing: false, 
-          result: found ? { online: found.status === 'online', latency: found.latency_ms } : { online: false, latency: 0 } 
-        });
-      }
-    } catch (err) {
-      setModalPingStatus({ testing: false, result: { online: false, latency: 0 } });
-    }
   };
 
   // Save Speaker (Create / Update)
@@ -1526,13 +1466,6 @@ export default function App() {
     } catch (err) {
       alert('Gagal menghapus speaker: ' + err);
     }
-  };
-
-  // Toggle Custom Speaker selection
-  const handleToggleSelectSpeaker = (id) => {
-    setSelectedSpeakerIds(prev => 
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
   };
 
   // Toggle Schedule

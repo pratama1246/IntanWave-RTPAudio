@@ -28,6 +28,9 @@ client-windows/IntanWave-Node/
 *.production_backup
 *.bak
 *.sqlite3-journal
+backend/storage/*.db
+backend/storage/*.db-*
+*.db
 
 # Logs & Secrets
 *.log
