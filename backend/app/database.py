@@ -387,14 +387,14 @@ def upsert_node_heartbeat(
     primary_group = grp_list[0]
     grp_json = json.dumps(grp_list)
 
-    # Format device name agar tidak kembar: sertakan hostname jika device_name default/generic
+    # Format device name agar tidak kembar: sertakan hostname jika device_name default/generic atau bentrok
     is_generic_name = not device_name or device_name.strip() in (
         "Terminal Audio Node (Amplifier)",
         "Terminal Audio Node",
         "Terminal Audio",
         "PC Audio"
     )
-    if is_generic_name and hostname:
+    if hostname and (is_generic_name or (device_name.startswith("Terminal Audio (") and not device_name.endswith(f"({hostname})"))):
         device_name = f"Terminal Audio ({hostname})"
     else:
         device_name = (device_name or f"Terminal Audio ({hostname or node_id})").strip()

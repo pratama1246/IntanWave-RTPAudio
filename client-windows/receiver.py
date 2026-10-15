@@ -226,8 +226,12 @@ class AudioReceiver:
         if not curr_node_id or curr_node_id == "node_client_01" or not curr_node_id.startswith(f"node_{clean_host}"):
             cfg["node_id"] = stable_node_id
             changed = True
-        if not cfg.get("device_name") or cfg.get("device_name") == "Terminal Audio Node (Amplifier)":
-            cfg["device_name"] = f"Terminal Audio ({socket.gethostname()})"
+        curr_host = socket.gethostname()
+        curr_device_name = cfg.get("device_name", "").strip()
+        match_bracket = re.search(r"\(([^)]+)\)", curr_device_name)
+        stale_bracket = match_bracket and match_bracket.group(1).strip().upper() != curr_host.strip().upper()
+        if not curr_device_name or curr_device_name == "Terminal Audio Node (Amplifier)" or stale_bracket:
+            cfg["device_name"] = f"Terminal Audio ({curr_host})"
             changed = True
         if not cfg.get("groups") and not cfg.get("zone"):
             cfg["groups"] = ["Kantor"]
