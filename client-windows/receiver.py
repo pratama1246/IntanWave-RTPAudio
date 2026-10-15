@@ -573,6 +573,7 @@ class AudioReceiver:
         filename = data.get("filename") or ""
         title = data.get("title") or filename or "Siaran Audio"
         category = data.get("category") or "biasa"
+        delay_ms = int(data.get("delay_ms") or 0)
 
         # Khusus event test atau file test_chime.wav, putar langsung lewat fungsi test chime
         if filename == "test_chime.wav" or data.get("action") == "test":
@@ -588,11 +589,11 @@ class AudioReceiver:
 
         threading.Thread(
             target=self._play_local_file_task,
-            args=(session_id, filename, title, category),
+            args=(session_id, filename, title, category, delay_ms),
             daemon=True
         ).start()
 
-    def _play_local_file_task(self, session_id: str, filename: str, title: str, category: str):
+    def _play_local_file_task(self, session_id: str, filename: str, title: str, category: str, delay_ms: int = 0):
         """Memutar berkas media lokal via ffplay ke soundcard amplifier dengan kualitas penuh."""
         if not filename:
             with self.player_lock:
@@ -620,6 +621,13 @@ class AudioReceiver:
                     self.active_source = None
                     self.set_status("STANDBY", "biasa", "")
             return
+
+        # ponytail: delay to sync with outdoor IP horn buffer (~600ms) when both active
+        if delay_ms > 0:
+            time.sleep(delay_ms / 1000.0)
+            with self.player_lock:
+                if self.active_session_id != session_id:
+                    return
 
         proc = None
         with self.player_lock:
