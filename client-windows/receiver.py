@@ -140,6 +140,21 @@ class AudioReceiver:
         self.active_ssrc = None
         self.active_ssrc_last = 0.0
 
+        # Media & Schedules Sync (Model 1: Cache & Trigger)
+        self.media_dir = EXE_DIR / "media"
+        try:
+            self.media_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        self.schedules = []
+        self.on_schedules_change = None
+        self.is_syncing = False
+        self.sync_lock = threading.Lock()
+        self.active_session_id = None
+        self.local_player_proc = None
+        self.player_lock = threading.Lock()
+        self.last_sync_time = 0.0
+
         # Background Threads
         self.http_thread = None
         self.udp_thread = None
@@ -369,6 +384,8 @@ class AudioReceiver:
 
                     if self.on_heartbeat_change:
                         self.on_heartbeat_change(True, node_data)
+                    if time.time() - self.last_sync_time > 300 or not self.schedules:
+                        self.sync_schedules_and_media()
                     return True
         except Exception as e:
             self.server_connected = False
@@ -450,6 +467,200 @@ class AudioReceiver:
             self.current_title = title
         if self.on_status_change:
             self.on_status_change(new_status, self.current_category, self.current_title)
+
+    # =========================================================================
+    # MODEL 1: CACHE & TRIGGER SCHEDULE SYNC
+    # =========================================================================
+    def sync_schedules_and_media(self, force=False):
+        """
+        Sinkronisasi jadwal dan media background untuk node PC ini secara asinkron.
+        HANYA mengambil jadwal yang relevan dengan PC ini dari server, dan mengunduh
+        file audio yang belum ada di folder media lokal.
+        """
+        if not self.server_url or not self.node_id:
+            return
+
+        def _do_sync():
+            if not self.sync_lock.acquire(blocking=False):
+                if not force:
+                    return
+                self.sync_lock.acquire()
+
+            try:
+                self.is_syncing = True
+                url = f"{self.server_url}/api/nodes/{urllib.parse.quote(self.node_id)}/schedules"
+                req = urllib.request.Request(url, headers={"User-Agent": "IntanWaveNode/1.0"})
+                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    if resp.status == 200:
+                        raw_data = json.loads(resp.read().decode("utf-8"))
+                    else:
+                        return
+
+                updated_schedules = []
+                for item in raw_data:
+                    fname = item.get("audio_filename") or item.get("filename") or ""
+                    if not fname:
+                        item["media_status"] = "Tidak Ada Berkas"
+                        updated_schedules.append(item)
+                        continue
+
+                    target_file = self.media_dir / fname
+                    if not target_file.exists() or target_file.stat().st_size == 0:
+                        dl_ok = self._download_media_file(fname)
+                        item["media_status"] = "Siap" if dl_ok else "Gagal Unduh"
+                    else:
+                        item["media_status"] = "Siap"
+                    updated_schedules.append(item)
+
+                self.schedules = updated_schedules
+                self.last_sync_time = time.time()
+                if self.on_schedules_change:
+                    self.on_schedules_change(self.schedules)
+            except Exception as e:
+                print(f"[!] Gagal sinkronisasi jadwal/media: {e}")
+            finally:
+                self.is_syncing = False
+                self.sync_lock.release()
+
+        threading.Thread(target=_do_sync, daemon=True).start()
+
+    def _download_media_file(self, filename: str) -> bool:
+        """Mengunduh berkas audio dari server ke direktori media lokal secara aman."""
+        if not self.server_url or not filename:
+            return False
+        dl_url = f"{self.server_url}/api/audio/stream-file/{urllib.parse.quote(filename)}"
+        target_path = self.media_dir / filename
+        temp_path = self.media_dir / f"{filename}.tmp_{os.getpid()}"
+        try:
+            req = urllib.request.Request(dl_url, headers={"User-Agent": "IntanWaveNode/1.0"})
+            with urllib.request.urlopen(req, timeout=15.0) as resp:
+                if resp.status == 200:
+                    with open(temp_path, "wb") as f:
+                        shutil.copyfileobj(resp, f)
+                    if temp_path.exists() and temp_path.stat().st_size > 0:
+                        if target_path.exists():
+                            try:
+                                target_path.unlink()
+                            except Exception:
+                                pass
+                        temp_path.replace(target_path)
+                        print(f"[*] Berhasil mengunduh media lokal: {filename} ({target_path.stat().st_size} bytes)")
+                        return True
+        except Exception as e:
+            print(f"[!] Gagal mengunduh file {filename}: {e}")
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+        return False
+
+    def _handle_play_event(self, data: dict):
+        """Menangani sinyal trigger siaran audio dari server."""
+        session_id = data.get("session_id")
+        filename = data.get("filename") or ""
+        title = data.get("title") or filename or "Siaran Audio"
+        category = data.get("category") or "biasa"
+
+        # Anti dobel request / double click
+        with self.player_lock:
+            if self.active_session_id and self.active_session_id == session_id:
+                return
+
+        threading.Thread(
+            target=self._play_local_file_task,
+            args=(session_id, filename, title, category),
+            daemon=True
+        ).start()
+
+    def _play_local_file_task(self, session_id: str, filename: str, title: str, category: str):
+        """Memutar berkas media lokal via ffplay ke soundcard amplifier dengan kualitas penuh."""
+        if not filename:
+            return
+
+        target_file = self.media_dir / filename
+        # Jika file belum ada di cache, unduh seketika
+        if not target_file.exists() or target_file.stat().st_size == 0:
+            self._download_media_file(filename)
+
+        if not target_file.exists():
+            print(f"[!] Berkas audio '{filename}' tidak ditemukan di media cache.")
+            return
+
+        proc = None
+        with self.player_lock:
+            self._stop_local_player_locked()
+            self._close_player()
+
+            self.active_session_id = session_id
+            self.active_source = "LOCAL"
+            self.set_status("STREAMING", category, title)
+            self.notify_toast("IntanWave — Siaran Audio", f"Memutar: {title}")
+
+            cmd = [
+                get_ffplay_bin(),
+                "-nodisp",
+                "-autoexit",
+                "-loglevel", "quiet",
+                "-volume", "100",
+                str(target_file.resolve())
+            ]
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+                )
+                self.local_player_proc = proc
+            except Exception as e:
+                print(f"[!] Gagal memutar media lokal {filename}: {e}")
+                self._on_local_playback_end(session_id)
+                return
+
+        try:
+            proc.wait()
+        except Exception:
+            pass
+
+        self._on_local_playback_end(session_id)
+
+    def _on_local_playback_end(self, session_id: str):
+        """Membersihkan state setelah pemutaran audio lokal selesai."""
+        with self.player_lock:
+            if self.active_session_id != session_id:
+                return
+            self._stop_local_player_locked()
+            self.active_session_id = None
+            self.active_source = None
+            self.set_status("STANDBY", "biasa", "")
+            self._start_player("alaw", 8000)
+
+    def _handle_stop_event(self, data: dict):
+        """Menangani perintah stop manual dari server."""
+        session_id = data.get("session_id")
+        with self.player_lock:
+            if session_id and self.active_session_id and session_id != self.active_session_id:
+                return
+            self._stop_local_player_locked()
+            self.active_session_id = None
+            self.active_source = None
+            self.set_status("STANDBY", "biasa", "")
+            self._start_player("alaw", 8000)
+
+    def _stop_local_player_locked(self):
+        """Menghentikan proses pemutar file lokal jika sedang aktif."""
+        if self.local_player_proc:
+            try:
+                self.local_player_proc.terminate()
+                self.local_player_proc.wait(timeout=0.4)
+            except Exception:
+                try:
+                    self.local_player_proc.kill()
+                except Exception:
+                    pass
+            self.local_player_proc = None
+
     def _on_stream_end(self):
         """
         Menangani akhir siaran audio secara mulus:
@@ -756,11 +967,23 @@ class AudioReceiver:
                     if masked and mask_key:
                         payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
 
-                    # Opcode 0x1: Pesan Teks (Kontrol / stream_end)
+                    # Opcode 0x1: Pesan Teks (Kontrol / Event JSON / stream_end)
                     if opcode == 0x1:
                         try:
-                            text_msg = payload.decode("utf-8", errors="ignore")
-                            if "stream_end" in text_msg:
+                            text_msg = payload.decode("utf-8", errors="ignore").strip()
+                            if text_msg.startswith("{"):
+                                data = json.loads(text_msg)
+                                action = data.get("action")
+                                msg_type = data.get("type")
+                                if action == "play":
+                                    self._handle_play_event(data)
+                                elif action == "stop":
+                                    self._handle_stop_event(data)
+                                elif msg_type in ("schedules_update", "audio_update"):
+                                    self.sync_schedules_and_media(force=True)
+                                elif msg_type == "stream_end":
+                                    self._on_stream_end()
+                            elif "stream_end" in text_msg:
                                 self._on_stream_end()
                         except Exception:
                             pass
@@ -924,6 +1147,10 @@ class AudioReceiver:
         source_key = "RTP_SERVER" if is_server else "RTP_PHONE"
 
         if self.active_source != source_key:
+            if self.active_source == "LOCAL":
+                with self.player_lock:
+                    self._stop_local_player_locked()
+                    self.active_session_id = None
             self.active_source = source_key
             if is_server:
                 self.set_status("STREAMING", "biasa", "Siaran Server PA (UDP)")
@@ -1007,6 +1234,9 @@ class AudioReceiver:
 
     def stop(self):
         self.is_running = False
+        with self.player_lock:
+            self._stop_local_player_locked()
+            self.active_session_id = None
         self._on_stream_end()
         self._close_player()
 

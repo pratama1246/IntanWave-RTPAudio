@@ -80,6 +80,11 @@ class StreamHub:
         for loop, q in targets:
             self._call(loop, self._put, q, chunk)
 
+    def publish_event(self, event_dict: dict, all_nodes: bool = False, nodes: Optional[Set[str]] = None):
+        import json
+        payload = ("JSON:" + json.dumps(event_dict)).encode("utf-8")
+        self.publish(payload, all_nodes=all_nodes, nodes=nodes)
+
     # --- internal ---
     @staticmethod
     def _call(loop, fn, *args):

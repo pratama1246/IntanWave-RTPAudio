@@ -149,7 +149,8 @@ class IntanWaveNodeWindow:
         self.tray_icon = None
 
         self.root.title("IntanWave Node")
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
+        self.root.minsize(460, 560)
 
         # Set Window Icon
         if ICO_PATH.exists():
@@ -171,15 +172,15 @@ class IntanWaveNodeWindow:
         self.style.configure("HeaderTitle.TLabel", font=("Segoe UI", 12, "bold"), foreground="#1c1c1c")
         self.style.configure("HeaderSub.TLabel", font=("Segoe UI", 8), foreground="#555555")
         self.style.configure("Save.TButton", font=("Segoe UI", 9, "bold"), padding=(10, 5))
-        self.style.configure("Action.TButton", font=("Segoe UI", 9), padding=(8, 5))
+        self.style.configure("Action.TButton", font=("Segoe UI", 8), padding=(6, 3))
 
         self.init_ui()
         self.setup_tray()
 
         # Dynamic window geometry calculation: prevents clipping on high-DPI displays
         self.root.update_idletasks()
-        req_w = max(420, self.root.winfo_reqwidth() + 20)
-        req_h = max(440, self.root.winfo_reqheight() + 20)
+        req_w = max(500, self.root.winfo_reqwidth() + 20)
+        req_h = max(620, self.root.winfo_reqheight() + 20)
         self.root.geometry(f"{req_w}x{req_h}")
 
         # Handle window close (X) -> minimize to tray
@@ -278,7 +279,65 @@ class IntanWaveNodeWindow:
         )
         lbl_hint.grid(row=1, column=1, sticky=tk.W, padx=(8, 0), pady=(1, 0))
 
-        # 4. Status Indikator Server (Live Heartbeat Badge)
+        # 4. Tabel Jadwal Siaran Khusus PC ini (Model 1: Cache & Trigger)
+        sch_frame = ttk.LabelFrame(main_frame, text=" Jadwal Siaran Kantor (PC) ", padding="10 8 10 8")
+        sch_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        sch_header = ttk.Frame(sch_frame)
+        sch_header.pack(fill=tk.X, pady=(0, 6))
+
+        self.lbl_sch_count = ttk.Label(
+            sch_header,
+            text="Memuat Jadwal...",
+            font=("Segoe UI", 8, "bold"),
+            foreground="#2563eb"
+        )
+        self.lbl_sch_count.pack(side=tk.LEFT)
+
+        btn_refresh_sch = ttk.Button(
+            sch_header,
+            text="Perbarui",
+            style="Action.TButton",
+            command=lambda: self.receiver.sync_schedules_and_media(force=True)
+        )
+        btn_refresh_sch.pack(side=tk.RIGHT, padx=(4, 0))
+
+        btn_open_media = ttk.Button(
+            sch_header,
+            text="Buka Folder Media",
+            style="Action.TButton",
+            command=self.open_media_folder
+        )
+        btn_open_media.pack(side=tk.RIGHT)
+
+        tree_container = ttk.Frame(sch_frame)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+
+        cols = ("waktu", "nama", "berkas", "status")
+        self.tree_sch = ttk.Treeview(
+            tree_container,
+            columns=cols,
+            show="headings",
+            selectmode="browse",
+            height=4
+        )
+        self.tree_sch.heading("waktu", text="Waktu")
+        self.tree_sch.heading("nama", text="Nama Jadwal")
+        self.tree_sch.heading("berkas", text="Berkas Audio")
+        self.tree_sch.heading("status", text="Status File")
+
+        self.tree_sch.column("waktu", width=55, minwidth=50, anchor=tk.CENTER)
+        self.tree_sch.column("nama", width=140, minwidth=100, anchor=tk.W)
+        self.tree_sch.column("berkas", width=130, minwidth=100, anchor=tk.W)
+        self.tree_sch.column("status", width=75, minwidth=60, anchor=tk.CENTER)
+
+        sch_scroll = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=self.tree_sch.yview)
+        self.tree_sch.configure(yscrollcommand=sch_scroll.set)
+
+        self.tree_sch.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sch_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # 5. Status Indikator Server (Live Heartbeat Badge)
         status_frame = ttk.Frame(main_frame)
         status_frame.pack(fill=tk.X, pady=(0, 6))
 
@@ -417,6 +476,38 @@ class IntanWaveNodeWindow:
 
         self.root.after(0, _apply)
 
+    def open_media_folder(self):
+        """Membuka folder penyimpanan media lokal di File Explorer Windows."""
+        try:
+            p = self.receiver.media_dir
+            p.mkdir(parents=True, exist_ok=True)
+            if sys.platform == "win32":
+                os.startfile(str(p.resolve()))
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", str(p.resolve())])
+        except Exception as e:
+            messagebox.showwarning("Peringatan", f"Gagal membuka folder media: {e}", parent=self.root)
+
+    def update_schedules_list(self, schedules: list):
+        """Thread-safe callback pembaruan daftar jadwal yang menargetkan PC ini."""
+        def _apply():
+            for item in self.tree_sch.get_children():
+                self.tree_sch.delete(item)
+
+            count = len(schedules) if schedules else 0
+            self.lbl_sch_count.config(text=f"{count} Jadwal Tersinkron" if count else "Belum Ada Jadwal")
+
+            if schedules:
+                for s in schedules:
+                    waktu = s.get("time_str") or "-"
+                    nama = s.get("name") or "-"
+                    berkas = s.get("audio_filename") or s.get("filename") or "-"
+                    status = s.get("media_status") or "Siap"
+                    self.tree_sch.insert("", tk.END, values=(waktu, nama, berkas, status))
+
+        self.root.after(0, _apply)
+
     def setup_tray(self):
         """Inisialisasi Windows System Tray Icon via pystray."""
         try:
@@ -433,6 +524,7 @@ class IntanWaveNodeWindow:
             pystray.MenuItem("IntanWave Node", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Buka Panel Kontrol", self.on_tray_show, default=True),
+            pystray.MenuItem("Buka Folder Media", lambda: self.open_media_folder()),
             pystray.MenuItem("Tes Bunyi Ampli", lambda: self.receiver.play_test_chime()),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Keluar", self.on_tray_quit)
@@ -479,6 +571,7 @@ class ClientApp:
         self.window = IntanWaveNodeWindow(self.root, self.receiver)
         self.receiver.on_status_change = self.window.update_status
         self.receiver.on_heartbeat_change = self.window.update_heartbeat_status
+        self.receiver.on_schedules_change = self.window.update_schedules_list
 
 
     def restore_existing_window(self):

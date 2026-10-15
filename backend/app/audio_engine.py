@@ -245,28 +245,20 @@ class AudioEngine:
             mc_ep = f"{mc_ip}:{mc_port}"
             rtp_endpoints = list(dict.fromkeys(target_endpoints)) if target_endpoints else None
             if rtp_endpoints is None or mc_ep in rtp_endpoints:
+                http_all = True
+                footprint.add("ALL_HTTP")
                 footprint.add("ALL_RTP")
-                destinations = [mc_ep]
-                try:
-                    with get_db() as conn:
-                        node_rows = conn.execute(
-                            "SELECT ip_address, port, node_id FROM speakers "
-                            "WHERE enabled = 1 AND device_type = 'node' AND ip_address NOT LIKE 'pending-%'"
-                        ).fetchall()
-                    for nr in node_rows:
-                        destinations.append(f"{nr['ip_address']}:{nr['port']}")
-                        footprint.add(f"node:{nr['node_id']}")
-                except Exception:
-                    pass
-                rtp_list = list(dict.fromkeys(destinations))
+                rtp_list = [mc_ep]
             else:
                 kept = []
                 for ep in rtp_endpoints:
-                    kept.append(ep)
                     ip = ep.split(":")[0]
                     if ip in node_by_ip:
-                        footprint.add(f"node:{node_by_ip[ip]}")
+                        nid = node_by_ip[ip]
+                        http_nodes.add(nid)
+                        footprint.add(f"node:{nid}")
                     else:
+                        kept.append(ep)
                         footprint.add(f"rtp:{ep}")
                 rtp_list = list(dict.fromkeys(kept))
 
@@ -422,7 +414,20 @@ class AudioEngine:
             http_nodes=http_nodes
         )
 
-        use_http = enable_multicast and (http_all or bool(http_nodes))
+        # Kirim sinyal trigger JSON ke PC client nodes
+        if enable_multicast and (http_all or bool(http_nodes)):
+            stream_hub.publish_event(
+                {
+                    "action": "play",
+                    "session_id": session_id,
+                    "filename": file_name,
+                    "title": title,
+                    "category": category,
+                    "duration": duration
+                },
+                all_nodes=http_all,
+                nodes=http_nodes
+            )
 
         net_cmd_args = []
         if rtp_list:
@@ -448,21 +453,6 @@ class AudioEngine:
                     "-f", "tee", "|".join(slaves)
                 ])
 
-        if use_http:
-            net_cmd_args.extend([
-                "-map", "0:a",
-                "-af", "aresample=44100:async=1",
-                "-c:a", "libmp3lame",
-                "-b:a", "128k",
-                "-ac", "1",
-                "-ar", "44100",
-                "-f", "mp3",
-                "-write_xing", "0",
-                "-id3v2_version", "0",
-                "-flush_packets", "1",
-                "pipe:1"
-            ])
-
         if net_cmd_args:
             net_cmd = [
                 "ffmpeg", "-re", "-y",
@@ -470,26 +460,13 @@ class AudioEngine:
                 *net_cmd_args
             ]
             try:
-                if use_http:
-                    stream_hub.begin(all_nodes=http_all, nodes=http_nodes)
                 session.multicast_proc = subprocess.Popen(
                     net_cmd,
-                    stdout=subprocess.PIPE if use_http else subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    bufsize=0,
                     creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
                 )
-                if use_http:
-                    t_pump = threading.Thread(
-                        target=self._pump_session_stream,
-                        args=(session,),
-                        daemon=True
-                    )
-                    session.pump_thread = t_pump
-                    t_pump.start()
             except Exception as e:
-                if use_http:
-                    stream_hub.end(all_nodes=http_all, nodes=http_nodes)
                 log_event("RTP_ERROR", f"Gagal menjalankan ffmpeg stream sesi {session_id}: {e}", level="ERROR")
 
         if enable_local:
@@ -520,29 +497,6 @@ class AudioEngine:
         log_event("PLAYBACK_STARTED", f"Memutar '{title}' -> {target_desc} (P{priority}, Sesi={session_id})")
         return session_id
 
-    def _pump_session_stream(self, session: PlaybackSession):
-        """Membaca MP3 dari stdout FFmpeg sesi ini dan membagikan secara spesifik ke node targetnya."""
-        proc = session.multicast_proc
-        if not proc or not proc.stdout:
-            return
-        try:
-            while not session.stop_event.is_set():
-                chunk = proc.stdout.read(4096)
-                if not chunk:
-                    break
-                stream_hub.publish(
-                    chunk,
-                    all_nodes=session.http_all,
-                    nodes=session.http_nodes
-                )
-        except Exception:
-            pass
-        finally:
-            stream_hub.end(
-                all_nodes=session.http_all,
-                nodes=session.http_nodes
-            )
-
     def _monitor_session(self, session: PlaybackSession):
         """Thread background pemantau progres dan deteksi selesainya sesi pemutaran tertentu."""
         while not session.stop_event.is_set():
@@ -551,7 +505,11 @@ class AudioEngine:
             mc_done = (session.multicast_proc is None) or (session.multicast_proc.poll() is not None)
             local_done = (session.local_proc is None) or (session.local_proc.poll() is not None)
 
-            if mc_done and local_done:
+            if session.multicast_proc is None and session.local_proc is None:
+                elapsed = time.time() - session.started_at
+                if elapsed >= max(session.duration, 1.0):
+                    break
+            elif mc_done and local_done:
                 break
 
             self.notify_listeners()
@@ -561,6 +519,16 @@ class AudioEngine:
             was_active = self.active_sessions.pop(session.session_id, None) is not None
             if was_active and not session.stop_event.is_set():
                 log_event("PLAYBACK_FINISHED", f"Selesai memutar '{session.title}' (Sesi={session.session_id})")
+                if session.http_all or bool(session.http_nodes):
+                    stream_hub.publish_event(
+                        {
+                            "action": "stop",
+                            "session_id": session.session_id,
+                            "reason": "FINISHED"
+                        },
+                        all_nodes=session.http_all,
+                        nodes=session.http_nodes
+                    )
 
             self._process_queue_locked()
 
@@ -572,6 +540,16 @@ class AudioEngine:
             return
         session.stop_event.set()
         self._cleanup_session_procs(session)
+        if session.http_all or bool(session.http_nodes):
+            stream_hub.publish_event(
+                {
+                    "action": "stop",
+                    "session_id": session_id,
+                    "reason": reason
+                },
+                all_nodes=session.http_all,
+                nodes=session.http_nodes
+            )
         if reason == "STOPPED":
             log_event("PLAYBACK_STOPPED", f"Siaran dihentikan manual: '{session.title}' (Sesi={session_id})")
 
@@ -588,7 +566,6 @@ class AudioEngine:
                         pass
         session.multicast_proc = None
         session.local_proc = None
-        stream_hub.end(all_nodes=session.http_all, nodes=session.http_nodes)
 
     def _process_queue_locked(self):
         """Mengecek antrean playback dan menjalankan item yang speaker targetnya sudah bebas."""

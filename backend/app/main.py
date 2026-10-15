@@ -209,6 +209,7 @@ async def upload_audio(
 
     log_event("AUDIO_UPLOADED", f"Berhasil mengunggah '{disp_name}' [{cat.upper()}] ({file.filename})")
     await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
+    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Upload berhasil", "filename": file.filename, "category": cat}
 
 @app.patch("/api/audio/{audio_id}")
@@ -239,6 +240,7 @@ async def update_audio_info(audio_id: int, req: AudioUpdateRequest):
             log_event("AUDIO_UPDATED", f"Memperbarui audio ID {audio_id}: [{cat.upper() if cat else row['category'].upper()}] {req.display_name or row['display_name']}")
             
     await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
+    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Audio berhasil diperbarui"}
 
 @app.delete("/api/audio/{audio_id}")
@@ -260,6 +262,7 @@ async def delete_audio(audio_id: int):
 
     log_event("AUDIO_DELETED", f"Menghapus audio: '{row['display_name']}'")
     await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
+    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Audio berhasil dihapus"}
 
 @app.get("/api/audio/{audio_id}/stream")
@@ -277,7 +280,7 @@ def stream_audio(audio_id: int):
 
 @app.get("/api/audio/stream-file/{filename}")
 def stream_audio_by_filename(filename: str):
-    fpath = AUDIO_DIR / filename
+    fpath = resolve_audio_file(filename)
     if not fpath.exists():
         raise HTTPException(status_code=404, detail="Berkas fisik tidak ditemukan")
     ext = fpath.suffix.lower()[1:]
@@ -574,19 +577,34 @@ async def ws_node_stream(websocket: WebSocket, node_id: str):
             if chunk == b"STREAM_END":
                 await websocket.send_text(json.dumps({"type": "stream_end"}))
                 continue
+            if chunk.startswith(b"JSON:"):
+                try:
+                    await websocket.send_text(chunk[5:].decode("utf-8"))
+                except Exception:
+                    pass
+                continue
             chunks = [chunk]
             has_end = False
+            json_to_send = None
             while not q.empty() and len(chunks) < 10:
                 try:
                     c = q.get_nowait()
                     if c == b"STREAM_END":
                         has_end = True
                         break
+                    if c.startswith(b"JSON:"):
+                        json_to_send = c[5:].decode("utf-8")
+                        break
                     chunks.append(c)
                 except asyncio.QueueEmpty:
                     break
             if chunks:
                 await websocket.send_bytes(b"".join(chunks))
+            if json_to_send:
+                try:
+                    await websocket.send_text(json_to_send)
+                except Exception:
+                    pass
             if has_end:
                 await websocket.send_text(json.dumps({"type": "stream_end"}))
 
@@ -813,6 +831,56 @@ def list_schedules():
         """).fetchall()
         return [dict(r) for r in rows]
 
+@app.get("/api/nodes/{node_id}/schedules")
+def list_node_schedules(node_id: str):
+    """
+    Mengambil daftar jadwal siaran yang HANYA relevan / menargetkan node PC ini.
+    Termasuk target 'all', target grup yang cocok, atau target speaker ID yang cocok.
+    Jadwal yang hanya untuk speaker fisik lain (misal Dermaga) otomatis diabaikan.
+    """
+    node_id = (node_id or "").strip()
+    with get_db() as conn:
+        node_spk = conn.execute(
+            "SELECT * FROM speakers WHERE node_id = ? AND enabled = 1", (node_id,)
+        ).fetchone()
+        if not node_spk:
+            return []
+
+        node_id_int = node_spk["id"]
+        node_groups = [g.lower() for g in parse_groups(node_spk["groups"] or node_spk["zone"])]
+
+        rows = conn.execute("""
+            SELECT s.*, a.display_name as audio_title, a.filename as audio_filename, a.duration as audio_duration, a.size as audio_size
+            FROM schedules s
+            LEFT JOIN audio_files a ON s.audio_file_id = a.id
+            WHERE s.enabled = 1
+            ORDER BY s.time_str ASC
+        """).fetchall()
+
+        matched = []
+        for r in rows:
+            tmode = r["target_mode"] or "all"
+            tgroup_raw = r["target_group"] or r["target_zone"] or ""
+            target_groups = [g.lower() for g in parse_groups(tgroup_raw)]
+
+            target_speaker_ids = []
+            if r["target_speaker_id"]:
+                target_speaker_ids.append(r["target_speaker_id"])
+            if r["target_speakers"]:
+                for x in str(r["target_speakers"]).split(","):
+                    if x.strip().isdigit():
+                        target_speaker_ids.append(int(x.strip()))
+
+            is_all = (tmode == "all" and not target_groups and not target_speaker_ids)
+            group_match = any(g in node_groups for g in target_groups)
+            speaker_match = (node_id_int in target_speaker_ids)
+
+            if is_all or group_match or speaker_match:
+                item = dict(r)
+                matched.append(item)
+
+        return matched
+
 def normalize_time_str(time_str: str) -> str:
     """Membersihkan, mendeduplikasi, dan mengurutkan secara kronologis multi-jam (misal '15:00, 08:00' -> '08:00, 15:00')."""
     if not time_str:
@@ -848,6 +916,7 @@ async def create_schedule(s: ScheduleCreate):
     reload_schedules()
     log_event("SCHEDULE_CREATED", f"Membuat jadwal baru: '{s.name}' pada {norm_time}")
     await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
+    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Jadwal berhasil dibuat"}
 
 @app.put("/api/schedules/{schedule_id}")
@@ -867,6 +936,7 @@ async def update_schedule(schedule_id: int, s: ScheduleCreate):
     reload_schedules()
     log_event("SCHEDULE_UPDATED", f"Memperbarui jadwal: '{s.name}' pada {norm_time}")
     await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
+    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Jadwal berhasil diperbarui"}
 
 @app.patch("/api/schedules/{schedule_id}/toggle")
@@ -883,6 +953,7 @@ async def toggle_schedule(schedule_id: int):
     reload_schedules()
     log_event("SCHEDULE_TOGGLE", f"Mengubah status jadwal '{row['name']}' menjadi {'AKTIF' if new_val else 'NONAKTIF'}")
     await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
+    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Status jadwal diperbarui", "enabled": bool(new_val)}
 
 @app.delete("/api/schedules/{schedule_id}")
@@ -894,6 +965,7 @@ async def delete_schedule(schedule_id: int):
     reload_schedules()
     log_event("SCHEDULE_DELETED", f"Menghapus jadwal id {schedule_id}")
     await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
+    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Jadwal berhasil dihapus"}
 
 _last_manual_triggers = {}
