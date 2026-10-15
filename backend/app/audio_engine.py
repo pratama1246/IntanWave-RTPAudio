@@ -276,7 +276,8 @@ class AudioEngine:
         target_endpoints: Optional[List[str]] = None,
         target_desc: Optional[str] = None,
         category: str = "biasa",
-        is_manual: bool = True
+        is_manual: bool = True,
+        playback_mode: Optional[str] = None
     ) -> dict:
         """
         Memulai playback audio dengan Multi-Zone Parallel Streaming & Priority Queue.
@@ -370,7 +371,8 @@ class AudioEngine:
                 footprint=footprint,
                 http_all=http_all,
                 http_nodes=http_nodes,
-                rtp_list=rtp_list
+                rtp_list=rtp_list,
+                playback_mode=playback_mode
             )
 
         self.notify_listeners()
@@ -390,7 +392,8 @@ class AudioEngine:
         footprint: Set[str],
         http_all: bool,
         http_nodes: Set[str],
-        rtp_list: List[str]
+        rtp_list: List[str],
+        playback_mode: Optional[str] = None
     ) -> str:
         session_id = uuid.uuid4().hex[:8]
         duration = self.get_audio_duration(file_path)
@@ -426,7 +429,8 @@ class AudioEngine:
                     "filename": file_name,
                     "title": title,
                     "category": category,
-                    "duration": duration
+                    "duration": duration,
+                    "playback_mode": playback_mode
                 },
                 all_nodes=http_all,
                 nodes=http_nodes

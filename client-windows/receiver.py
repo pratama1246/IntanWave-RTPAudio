@@ -682,7 +682,7 @@ class AudioReceiver:
                 return
             self.stream_stopped = True
             self._stop_local_player_locked()
-            self._close_player()
+            self._close_player(immediate=True)
             self.active_session_id = None
             self.active_source = None
             self.prebuf = []
@@ -706,7 +706,10 @@ class AudioReceiver:
     def _on_ws_stream_start(self, data: dict):
         """Menangani inisialisasi streaming langsung via WebSocket."""
         with self.player_lock:
+            self._stop_local_player_locked()
+            self._close_player(immediate=True)
             self.stream_stopped = False
+            self.last_audio_time = time.time()
             title = data.get("title") or "Siaran Server PA (Stream Live)"
             category = data.get("category") or "biasa"
             self.active_session_id = data.get("session_id")
@@ -725,7 +728,7 @@ class AudioReceiver:
         self.stream_stopped = True
         with self.player_lock:
             self._stop_local_player_locked()
-            self._close_player()
+            self._close_player(immediate=False)
             self.active_session_id = None
             self.prebuf = []
             self.prebuf_ready = False
@@ -814,7 +817,7 @@ class AudioReceiver:
             self._close_player()
             self._start_player(self.player_codec or "alaw", getattr(self, "player_sample_rate", 8000) or 8000)
 
-    def _close_player(self):
+    def _close_player(self, immediate=False):
         """Menutup proses ffplay dan melepaskan sound card saat aplikasi ditutup atau codec berganti."""
         if self.player_proc and self.prebuf and not self.prebuf_ready:
             try:
@@ -824,17 +827,18 @@ class AudioReceiver:
                 pass
 
         if self.player_proc:
-            try:
-                self.player_proc.terminate()
-            except Exception:
-                pass
+            if immediate:
+                try:
+                    self.player_proc.terminate()
+                except Exception:
+                    pass
             try:
                 if self.player_proc.stdin:
                     self.player_proc.stdin.close()
             except Exception:
                 pass
             try:
-                self.player_proc.wait(timeout=0.2)
+                self.player_proc.wait(timeout=0.2 if immediate else 0.8)
             except Exception:
                 try:
                     self.player_proc.kill()
@@ -1022,12 +1026,12 @@ class AudioReceiver:
                                 data = json.loads(text_msg)
                                 action = data.get("action")
                                 msg_type = data.get("type")
-                                if action == "test" or data.get("filename") == "test_chime.wav":
+                                if action == "test":
                                     self.stream_stopped = False
                                     self.play_test_chime()
                                 elif action == "play":
                                     self.stream_stopped = False
-                                    if self.playback_mode == "stream":
+                                    if self.playback_mode == "stream" or data.get("playback_mode") == "stream" or data.get("mode") == "stream":
                                         self._on_ws_stream_start(data)
                                     else:
                                         self._handle_play_event(data)

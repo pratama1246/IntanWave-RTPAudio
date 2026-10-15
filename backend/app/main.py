@@ -300,6 +300,7 @@ class PlayRequest(BaseModel):
     target_zone: Optional[str] = None
     speaker_id: Optional[int] = None
     speaker_ids: Optional[List[int]] = None
+    playback_mode: Optional[str] = None
 
 @app.post("/api/play")
 def play_audio(req: PlayRequest):
@@ -391,7 +392,8 @@ def play_audio(req: PlayRequest):
             target_endpoints=target_endpoints,
             target_desc=target_desc,
             category=cat,
-            is_manual=True
+            is_manual=True,
+            playback_mode=req.playback_mode
         )
         return {"message": "Siaran dimulai", "status": audio_engine.get_status()}
     except Exception as e:
