@@ -416,8 +416,9 @@ class AudioEngine:
 
         use_http = enable_multicast and (http_all or bool(http_nodes))
 
-        # 1. Kirim sinyal trigger JSON ke PC client nodes (untuk mode Cache/Otomatis)
+        # 1. Bersihkan chunk audio lama dari stream_hub dan kirim sinyal trigger JSON ke PC client nodes
         if use_http:
+            stream_hub.begin(all_nodes=http_all, nodes=http_nodes)
             stream_hub.publish_event(
                 {
                     "action": "play",
@@ -478,8 +479,6 @@ class AudioEngine:
                 *net_cmd_args
             ]
             try:
-                if use_http:
-                    stream_hub.begin(all_nodes=http_all, nodes=http_nodes)
                 session.multicast_proc = subprocess.Popen(
                     net_cmd,
                     stdout=subprocess.PIPE if use_http else subprocess.DEVNULL,
@@ -593,7 +592,6 @@ class AudioEngine:
         if not session:
             return
         session.stop_event.set()
-        self._cleanup_session_procs(session)
         if session.http_all or bool(session.http_nodes):
             stream_hub.publish_event(
                 {
@@ -604,6 +602,7 @@ class AudioEngine:
                 all_nodes=session.http_all,
                 nodes=session.http_nodes
             )
+        self._cleanup_session_procs(session)
         if reason == "STOPPED":
             log_event("PLAYBACK_STOPPED", f"Siaran dihentikan manual: '{session.title}' (Sesi={session_id})")
 
@@ -679,12 +678,13 @@ class AudioEngine:
     def stop(self):
         """Menghentikan seluruh pemutaran audio di semua zona dan mengosongkan antrean."""
         with self._lock:
+            # Kirim stop event ke semua node WebSocket terlebih dahulu
+            stream_hub.publish_event({"action": "stop", "session_id": "all", "reason": "GLOBAL_STOP"}, all_nodes=True)
             for s in list(self.active_sessions.values()):
                 s.stop_event.set()
                 self._cleanup_session_procs(s)
             self.active_sessions.clear()
             self.playback_queue.clear()
-            stream_hub.publish_event({"action": "stop", "reason": "GLOBAL_STOP"}, all_nodes=True)
             stream_hub.end(all_nodes=True)
 
             self.status = "IDLE"
@@ -718,11 +718,11 @@ class AudioEngine:
             return False
 
     def test_speaker_audio(self, ip: str, port: int = 5004, node_id: Optional[str] = None):
-        """Memutar jingle test pendek langsung ke satu speaker tertentu via UDP RTP."""
+        """Memutar jingle test pendek langsung ke satu speaker tertentu via UDP RTP atau WebSocket trigger."""
         with self._lock:
             now = time.time()
             cooldown_key = f"{ip}:{node_id or ''}"
-            if cooldown_key in self._last_test_cooldown and (now - self._last_test_cooldown[cooldown_key] < 1.5):
+            if cooldown_key in self._last_test_cooldown and (now - self._last_test_cooldown[cooldown_key] < 1.0):
                 return
             self._last_test_cooldown[cooldown_key] = now
 
@@ -730,13 +730,18 @@ class AudioEngine:
             if not chime_path.exists():
                 raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
 
-        # Jika target adalah PC node, kirimkan trigger event saja (JANGAN kirim RTP UDP agar tidak dobel/dengung)
+        # Jika target adalah PC node, hentikan sesi aktif yang sedang streaming ke PC ini dan kirimkan trigger test
         node_by_ip = self._get_node_ip_map()
         target_nid = node_id or node_by_ip.get(ip)
         if target_nid:
+            with self._lock:
+                for s in list(self.active_sessions.values()):
+                    if s.http_all or (s.http_nodes and target_nid in s.http_nodes):
+                        self._stop_session_locked(s.session_id, reason="TEST_OVERRIDE")
+
             stream_hub.publish_event(
                 {
-                    "action": "play",
+                    "action": "test",
                     "session_id": f"test_{uuid.uuid4().hex[:6]}",
                     "filename": "test_chime.wav",
                     "title": "Uji Suara Speaker",

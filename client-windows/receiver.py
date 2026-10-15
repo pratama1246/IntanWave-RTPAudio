@@ -574,10 +574,17 @@ class AudioReceiver:
         title = data.get("title") or filename or "Siaran Audio"
         category = data.get("category") or "biasa"
 
+        # Khusus event test atau file test_chime.wav, putar langsung lewat fungsi test chime
+        if filename == "test_chime.wav" or data.get("action") == "test":
+            self.play_test_chime()
+            return
+
         # Anti dobel request / double click
         with self.player_lock:
             if self.active_session_id and self.active_session_id == session_id:
                 return
+            self.active_session_id = session_id
+            self.active_source = "LOCAL"
 
         threading.Thread(
             target=self._play_local_file_task,
@@ -588,6 +595,10 @@ class AudioReceiver:
     def _play_local_file_task(self, session_id: str, filename: str, title: str, category: str):
         """Memutar berkas media lokal via ffplay ke soundcard amplifier dengan kualitas penuh."""
         if not filename:
+            with self.player_lock:
+                if self.active_session_id == session_id:
+                    self.active_session_id = None
+                    self.active_source = None
             return
 
         target_file = self.media_dir / filename
@@ -603,10 +614,19 @@ class AudioReceiver:
 
         if not target_file.exists():
             print(f"[!] Berkas audio '{filename}' tidak ditemukan di media cache.")
+            with self.player_lock:
+                if self.active_session_id == session_id:
+                    self.active_session_id = None
+                    self.active_source = None
+                    self.set_status("STANDBY", "biasa", "")
             return
 
         proc = None
         with self.player_lock:
+            # Pastikan jika sesi sudah dibatalkan sebelum play dimulai, batalkan
+            if self.active_session_id != session_id:
+                return
+
             self._stop_local_player_locked()
             self._close_player()
 
@@ -658,7 +678,7 @@ class AudioReceiver:
         """Menangani perintah stop manual dari server."""
         session_id = data.get("session_id")
         with self.player_lock:
-            if session_id and self.active_session_id and session_id != self.active_session_id:
+            if session_id and session_id not in ("all", "global") and self.active_session_id and session_id != self.active_session_id:
                 return
             self.stream_stopped = True
             self._stop_local_player_locked()
@@ -699,12 +719,14 @@ class AudioReceiver:
         """
         Menangani akhir siaran audio secara mulus:
         1. Kembalikan status ke STANDBY.
-        2. Tutup proses player lama dan bersihkan buffer.
+        2. Tutup proses player lama (lokal maupun streaming) dan bersihkan buffer.
         3. Pastikan audio player pre-warmed dalam mode G.711 A-law 8kHz untuk siaran berikutnya.
         """
         self.stream_stopped = True
         with self.player_lock:
+            self._stop_local_player_locked()
             self._close_player()
+            self.active_session_id = None
             self.prebuf = []
             self.prebuf_ready = False
             self.active_source = None
@@ -803,12 +825,16 @@ class AudioReceiver:
 
         if self.player_proc:
             try:
+                self.player_proc.terminate()
+            except Exception:
+                pass
+            try:
                 if self.player_proc.stdin:
                     self.player_proc.stdin.close()
             except Exception:
                 pass
             try:
-                self.player_proc.wait(timeout=0.6)
+                self.player_proc.wait(timeout=0.2)
             except Exception:
                 try:
                     self.player_proc.kill()
@@ -996,18 +1022,18 @@ class AudioReceiver:
                                 data = json.loads(text_msg)
                                 action = data.get("action")
                                 msg_type = data.get("type")
-                                if action == "play":
+                                if action == "test" or data.get("filename") == "test_chime.wav":
+                                    self.stream_stopped = False
+                                    self.play_test_chime()
+                                elif action == "play":
                                     self.stream_stopped = False
                                     if self.playback_mode == "stream":
                                         self._on_ws_stream_start(data)
-                                    elif self.playback_mode == "cache":
-                                        self._handle_play_event(data)
                                     else:
                                         self._handle_play_event(data)
                                 elif action == "stop":
                                     self.stream_stopped = True
                                     self._handle_stop_event(data)
-                                    self._on_stream_end()
                                 elif msg_type in ("schedules_update", "audio_update"):
                                     self.sync_schedules_and_media(force=True)
                                 elif msg_type == "stream_end":
@@ -1250,11 +1276,11 @@ class AudioReceiver:
     # 3. MONITOR LOOP (Deteksi Berhentinya Siaran & Idle Cleanup)
     # =========================================================================
     def _monitor_loop(self):
-        """Memantau selesainya siaran jika tidak ada paket/chunk audio selama > 1.5 detik (toleransi jitter WiFi)."""
+        """Memantau selesainya siaran streaming (WS/RTP) jika tidak ada paket/chunk audio selama > 1.5 detik."""
         while self.is_running:
             time.sleep(0.1)
-            if self.status == "STREAMING":
-                if time.time() - self.last_audio_time > 1.5:
+            if self.status == "STREAMING" and self.active_source in ("WS", "RTP", "RTP_SERVER", "RTP_PHONE"):
+                if self.last_audio_time > 0 and (time.time() - self.last_audio_time > 1.5):
                     self._on_stream_end()
 
     # =========================================================================
@@ -1296,6 +1322,12 @@ class AudioReceiver:
                 pass
             self.stream_sock = None
 
+        if hasattr(self, 'stream_thread') and self.stream_thread and self.stream_thread.is_alive():
+            try:
+                self.stream_thread.join(timeout=0.4)
+            except Exception:
+                pass
+
         for s in self.udp_sockets:
             try:
                 s.close()
@@ -1306,6 +1338,13 @@ class AudioReceiver:
 
     def play_test_chime(self):
         """Memutar nada bel uji coba langsung ke soundcard Windows / amplifier."""
+        with self.player_lock:
+            self._stop_local_player_locked()
+            self._close_player()
+            self.active_session_id = f"test_{int(time.time())}"
+            self.active_source = "LOCAL"
+            self.set_status("STREAMING", "biasa", "Uji Suara Speaker")
+
         self.notify_toast(
             "IntanWave — Uji Coba Audio",
             "Memutar nada bel ding-dong ke speaker terminal."
@@ -1315,17 +1354,20 @@ class AudioReceiver:
             candidates = [
                 EXE_DIR / "test_chime.wav",
                 BUNDLE_DIR / "test_chime.wav",
+                self.media_dir / "test_chime.wav",
                 EXE_DIR / "_internal" / "test_chime.wav",
                 BUNDLE_DIR / "_internal" / "test_chime.wav",
             ]
+            played = False
             for candidate in candidates:
-                if candidate.exists():
+                if candidate.exists() and candidate.stat().st_size > 0:
                     sound_path = str(candidate.resolve())
                     if sys.platform == "win32":
                         try:
                             import winsound
                             winsound.PlaySound(sound_path, winsound.SND_FILENAME | winsound.SND_NODEFAULT)
-                            return
+                            played = True
+                            break
                         except Exception as e:
                             print("Winsound error:", e)
 
@@ -1336,16 +1378,23 @@ class AudioReceiver:
                             creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
                             timeout=5
                         )
-                        return
+                        played = True
+                        break
                     except Exception as e:
                         print("FFplay chime error:", e)
 
-            if sys.platform == "win32":
+            if not played and sys.platform == "win32":
                 try:
                     import winsound
                     winsound.MessageBeep(winsound.MB_ICONASTERISK)
                 except Exception:
                     pass
+
+            with self.player_lock:
+                self.active_session_id = None
+                self.active_source = None
+                self.set_status("STANDBY", "biasa", "")
+                self._start_player("alaw", 8000)
 
         threading.Thread(target=_play_audio, daemon=True).start()
         return True

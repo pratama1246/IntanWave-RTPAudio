@@ -23,6 +23,10 @@ class StreamHub:
         q: asyncio.Queue = asyncio.Queue(maxsize=400)  # ~8 detik audio (400 x 20ms)
         token = object()
         with self._lock:
+            # Bersihkan koneksi lama yang stale untuk node_id yang sama
+            stale_tokens = [tok for tok, (nid, _, _) in self._subs.items() if nid == node_id]
+            for tok in stale_tokens:
+                self._subs.pop(tok, None)
             self._subs[token] = (node_id, loop, q)
         return token, q
 
@@ -97,27 +101,45 @@ class StreamHub:
     def _put(q: asyncio.Queue, chunk: bytes):
         if q.full():
             try:
-                q.get_nowait()  # buang chunk paling lama agar tidak menumpuk (client lambat)
+                item = q.get_nowait()
+                # Jangan pernah membuang pesan kontrol JSON
+                if item.startswith(b"JSON:"):
+                    q.put_nowait(item)
             except asyncio.QueueEmpty:
                 pass
-        q.put_nowait(chunk)
+        try:
+            q.put_nowait(chunk)
+        except asyncio.QueueFull:
+            pass
 
     @staticmethod
     def _end_sub(q: asyncio.Queue):
+        # Buang hanya chunk audio mentah yang tersisa, TETAP pertahankan event JSON
+        saved_events = []
         while not q.empty():
             try:
-                q.get_nowait()
+                item = q.get_nowait()
+                if item.startswith(b"JSON:"):
+                    saved_events.append(item)
             except asyncio.QueueEmpty:
                 break
+        for ev in saved_events:
+            q.put_nowait(ev)
         q.put_nowait(b"STREAM_END")
 
     @staticmethod
     def _flush(q: asyncio.Queue):
+        # Buang hanya chunk audio mentah, TETAP pertahankan event JSON
+        saved_events = []
         while not q.empty():
             try:
-                q.get_nowait()
+                item = q.get_nowait()
+                if item.startswith(b"JSON:"):
+                    saved_events.append(item)
             except asyncio.QueueEmpty:
                 break
+        for ev in saved_events:
+            q.put_nowait(ev)
 
 
 stream_hub = StreamHub()
