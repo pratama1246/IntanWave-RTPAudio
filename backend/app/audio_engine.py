@@ -422,8 +422,6 @@ class AudioEngine:
         # 1. Bersihkan chunk audio lama dari stream_hub dan kirim sinyal trigger JSON ke PC client nodes
         if use_http:
             stream_hub.begin(all_nodes=http_all, nodes=http_nodes)
-            # ponytail: delay client only when hardware RTP speakers are also targeted (matches ~600ms horn buffer)
-            sync_delay = 600 if bool(rtp_list) else 0
             stream_hub.publish_event(
                 {
                     "action": "play",
@@ -432,8 +430,7 @@ class AudioEngine:
                     "title": title,
                     "category": category,
                     "duration": duration,
-                    "playback_mode": playback_mode,
-                    "delay_ms": sync_delay
+                    "playback_mode": playback_mode
                 },
                 all_nodes=http_all,
                 nodes=http_nodes
