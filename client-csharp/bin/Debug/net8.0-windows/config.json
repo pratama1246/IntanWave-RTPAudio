@@ -1,0 +1,25 @@
+{
+  "server_url": "http://10.183.55.114:7080",
+  "node_id": "node_tamaodyssey",
+  "device_name": "Terminal Audio (TAMAODYSSEY)",
+  "groups": [
+    "Kantor"
+  ],
+  "zone": "Kantor",
+  "multicast_ip": "239.255.0.1",
+  "multicast_port": 5004,
+  "channels": [
+    {
+      "name": "Server PA Pelindo",
+      "ip": "239.255.0.1",
+      "port": 5004
+    },
+    {
+      "name": "Control Room IP Phone",
+      "ip": "239.255.0.2",
+      "port": 5004
+    }
+  ],
+  "playback_mode": "auto",
+  "enable_toast": true
+}

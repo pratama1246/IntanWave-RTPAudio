@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "IntanWaveNode (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "IntanWaveNode (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "server_url": "http://10.183.55.114:7080",
-  "node_id": "",
-  "device_name": "",
+  "node_id": "node_tamaodyssey",
+  "device_name": "Terminal Audio (TAMAODYSSEY)",
   "groups": [
     "Kantor"
   ],

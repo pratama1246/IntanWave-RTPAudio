@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="IntanWaveNode.Pages.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:IntanWaveNode.Pages"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24,16,24,24">
+        <StackPanel Spacing="18" MaxWidth="760">
+            <TextBlock Text="Pengaturan Klien Audio" Style="{StaticResource TitleTextBlockStyle}" />
+
+            <!-- Feedback InfoBar -->
+            <InfoBar x:Name="SaveFeedbackBar" IsOpen="False" Severity="Success" Title="Berhasil" Message="Pengaturan telah disimpan dan listener audio direkoneksi." />
+
+            <!-- Server & Network Settings Card -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20,16">
+                <StackPanel Spacing="14">
+                    <TextBlock Text="KONEKSI SERVER PA PELINDO" FontWeight="Bold" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                    <TextBox x:Name="ServerUrlBox" Header="Server PA URL" PlaceholderText="http://10.183.55.114:7080" />
+                    <TextBox x:Name="DeviceNameBox" Header="Nama Perangkat (Soundcard)" PlaceholderText="Terminal Audio" />
+                    <TextBox x:Name="ZoneBox" Header="Zona / Grup Speaker (pisahkan koma)" PlaceholderText="Kantor, Dermaga" />
+
+                    <ToggleSwitch x:Name="ToastSwitch" Header="Push Notifikasi Windows (Toast Alert)" IsOn="True" />
+                </StackPanel>
+            </Border>
+
+            <!-- Actions -->
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button Content="Simpan Perubahan" Style="{StaticResource AccentButtonStyle}" Click="SaveButton_Click" />
+                <Button Content="Buka Folder Media" Click="OpenFolderButton_Click" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
