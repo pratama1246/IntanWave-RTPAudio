@@ -431,12 +431,18 @@ class AudioReceiver:
             return
         self.last_toast_time = now
 
+        def _sanitize_ps(text):
+            return re.sub(r"[`$\"\r\n]+", " ", str(text or "")).replace("]]>", "").strip()
+
+        safe_title = _sanitize_ps(title) or "IntanWave Audio System"
+        safe_msg = _sanitize_ps(msg)
+
         def _do_toast():
             try:
                 toast_kwargs = {
                     "app_id": "IntanWave Audio System",
-                    "title": title,
-                    "msg": msg,
+                    "title": safe_title,
+                    "msg": safe_msg,
                     "duration": "short"
                 }
                 if ICON_PATH.exists():
@@ -510,8 +516,9 @@ class AudioReceiver:
 
                 updated_schedules = []
                 for item in raw_data:
-                    fname = item.get("audio_filename") or item.get("filename") or ""
-                    if not fname:
+                    raw_fname = item.get("audio_filename") or item.get("filename") or ""
+                    fname = Path(raw_fname).name.strip()
+                    if not fname or fname.startswith("."):
                         item["media_status"] = "Tidak Ada Berkas"
                         updated_schedules.append(item)
                         continue
@@ -538,11 +545,14 @@ class AudioReceiver:
 
     def _download_media_file(self, filename: str) -> bool:
         """Mengunduh berkas audio dari server ke direktori media lokal secara aman."""
-        if not self.server_url or not filename:
+        safe_fname = Path(filename or "").name.strip()
+        if not self.server_url or not safe_fname or safe_fname.startswith("."):
             return False
-        dl_url = f"{self.server_url}/api/audio/stream-file/{urllib.parse.quote(filename)}"
-        target_path = self.media_dir / filename
-        temp_path = self.media_dir / f"{filename}.tmp_{os.getpid()}"
+        dl_url = f"{self.server_url}/api/audio/stream-file/{urllib.parse.quote(safe_fname)}"
+        target_path = (self.media_dir / safe_fname).resolve()
+        if target_path.parent != self.media_dir.resolve():
+            return False
+        temp_path = self.media_dir / f"{safe_fname}.tmp_{os.getpid()}"
         try:
             req = urllib.request.Request(dl_url, headers={"User-Agent": "IntanWaveNode/1.0"})
             with urllib.request.urlopen(req, timeout=15.0) as resp:
@@ -556,10 +566,10 @@ class AudioReceiver:
                             except Exception:
                                 pass
                         temp_path.replace(target_path)
-                        print(f"[*] Berhasil mengunduh media lokal: {filename} ({target_path.stat().st_size} bytes)")
+                        print(f"[*] Berhasil mengunduh media lokal: {safe_fname} ({target_path.stat().st_size} bytes)")
                         return True
         except Exception as e:
-            print(f"[!] Gagal mengunduh file {filename}: {e}")
+            print(f"[!] Gagal mengunduh file {safe_fname}: {e}")
             if temp_path.exists():
                 try:
                     temp_path.unlink()
@@ -570,7 +580,7 @@ class AudioReceiver:
     def _handle_play_event(self, data: dict):
         """Menangani sinyal trigger siaran audio dari server."""
         session_id = data.get("session_id")
-        filename = data.get("filename") or ""
+        filename = Path(data.get("filename") or "").name.strip()
         title = data.get("title") or filename or "Siaran Audio"
         category = data.get("category") or "biasa"
         delay_ms = int(data.get("delay_ms") or 0)
@@ -595,7 +605,8 @@ class AudioReceiver:
 
     def _play_local_file_task(self, session_id: str, filename: str, title: str, category: str, delay_ms: int = 0):
         """Memutar berkas media lokal via ffplay ke soundcard amplifier dengan kualitas penuh."""
-        if not filename:
+        filename = Path(filename or "").name.strip()
+        if not filename or filename.startswith("."):
             with self.player_lock:
                 if self.active_session_id == session_id:
                     self.active_session_id = None

@@ -1,6 +1,8 @@
 import asyncio
+import ipaddress
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -183,22 +185,35 @@ def list_audio():
         rows = conn.execute("SELECT * FROM audio_files ORDER BY created_at DESC").fetchall()
         return [dict(r) for r in rows]
 
+def sanitize_label(text: Optional[str]) -> str:
+    if not text:
+        return ""
+    return re.sub(r"[`$\r\n]+", " ", str(text)).strip()
+
 @app.post("/api/audio/upload")
 async def upload_audio(
     file: UploadFile = File(...), 
     display_name: Optional[str] = Form(None),
     category: Optional[str] = Form("biasa")
 ):
-    ext = Path(file.filename).suffix.lower()
+    safe_filename = Path(file.filename or "").name.strip()
+    if not safe_filename or safe_filename.startswith("."):
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
+
+    ext = Path(safe_filename).suffix.lower()
     if ext not in {".wav", ".mp3", ".ogg", ".flac"}:
         raise HTTPException(status_code=400, detail="Format file harus MP3, WAV, OGG, atau FLAC")
 
-    save_path = AUDIO_DIR / file.filename
+    save_path = (AUDIO_DIR / safe_filename).resolve()
+    if save_path.parent != AUDIO_DIR.resolve():
+        raise HTTPException(status_code=400, detail="Path penyimpanan file tidak valid")
+
     with open(save_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     duration = audio_engine.get_audio_duration(str(save_path))
-    disp_name = display_name if display_name else Path(file.filename).stem.replace("_", " ").title()
+    raw_disp = display_name if display_name else Path(safe_filename).stem.replace("_", " ").title()
+    disp_name = sanitize_label(raw_disp) or Path(safe_filename).stem
     size = save_path.stat().st_size
     cat = (category or "biasa").strip().lower()
     if cat in ("k3", "safety"):
@@ -210,13 +225,13 @@ async def upload_audio(
         conn.execute("""
             INSERT OR REPLACE INTO audio_files (filename, display_name, file_path, format, duration, size, category)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (file.filename, disp_name, str(save_path.resolve()), ext[1:], duration, size, cat))
+        """, (safe_filename, disp_name, str(save_path), ext[1:], duration, size, cat))
         conn.commit()
 
-    log_event("AUDIO_UPLOADED", f"Berhasil mengunggah '{disp_name}' [{cat.upper()}] ({file.filename})")
+    log_event("AUDIO_UPLOADED", f"Berhasil mengunggah '{disp_name}' [{cat.upper()}] ({safe_filename})")
     await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
     stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
-    return {"message": "Upload berhasil", "filename": file.filename, "category": cat}
+    return {"message": "Upload berhasil", "filename": safe_filename, "category": cat}
 
 @app.patch("/api/audio/{audio_id}")
 async def update_audio_info(audio_id: int, req: AudioUpdateRequest):
@@ -235,15 +250,15 @@ async def update_audio_info(audio_id: int, req: AudioUpdateRequest):
             if cat in ("biasa", "darurat", "safety"):
                 updates.append("category = ?")
                 params.append(cat)
-        if req.display_name is not None and req.display_name.strip():
+        if req.display_name is not None and sanitize_label(req.display_name):
             updates.append("display_name = ?")
-            params.append(req.display_name.strip())
+            params.append(sanitize_label(req.display_name))
             
         if updates:
             params.append(audio_id)
             conn.execute(f"UPDATE audio_files SET {', '.join(updates)} WHERE id = ?", params)
             conn.commit()
-            log_event("AUDIO_UPDATED", f"Memperbarui audio ID {audio_id}: [{cat.upper() if cat else row['category'].upper()}] {req.display_name or row['display_name']}")
+            log_event("AUDIO_UPDATED", f"Memperbarui audio ID {audio_id}: [{cat.upper() if cat else row['category'].upper()}] {sanitize_label(req.display_name) or row['display_name']}")
             
     await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
     stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
@@ -374,7 +389,10 @@ def play_audio(req: PlayRequest):
                     desc_parts.append(f"{len(target_speaker_ids)} Speaker")
             target_desc = " + ".join(desc_parts) + f" ({len(target_endpoints)} Speaker)"
         else:
-            is_all_mode = True
+            raise HTTPException(
+                status_code=404,
+                detail="Speaker atau group target tidak ditemukan atau sedang nonaktif"
+            )
 
     if is_all_mode:
         # Mode "all" (Semua Speaker): Kirim ke seluruh IP speaker fisik terdaftar + Multicast
@@ -436,6 +454,24 @@ def delete_playback_queue_item(queue_id: str):
     return {"message": f"Item antrean {queue_id} dihapus", "status": audio_engine.get_status()}
 
 # --- SPEAKERS MONITORING & CRUD ---
+def validate_speaker_ip(ip_str: str) -> str:
+    raw = (ip_str or "").strip()
+    if raw.startswith("pending-") and re.fullmatch(r"pending-[A-Za-z0-9_.-]+", raw):
+        return raw
+    try:
+        return str(ipaddress.ip_address(raw))
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Format IP Address tidak valid: '{raw}'")
+
+def validate_speaker_port(port: int) -> int:
+    try:
+        p = int(port)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Port harus berupa angka (1-65535)")
+    if not (1 <= p <= 65535):
+        raise HTTPException(status_code=400, detail="Port harus berada di rentang 1-65535")
+    return p
+
 class SpeakerCreate(BaseModel):
     name: str
     ip_address: str
@@ -487,14 +523,17 @@ async def node_heartbeat(req: NodeHeartbeatRequest, request: Request):
     elif not client_ip:
         client_ip = req.client_ip or "127.0.0.1"
 
+    safe_ip = validate_speaker_ip(client_ip)
+    safe_port = validate_speaker_port(req.port or 5004)
+
     node = upsert_node_heartbeat(
         node_id=req.node_id,
-        device_name=req.device_name or "",
+        device_name=sanitize_label(req.device_name),
         groups=req.groups or req.group or req.zone,
         zone=req.zone or "",
-        ip_address=client_ip,
-        port=req.port or 5004,
-        hostname=req.hostname or "",
+        ip_address=safe_ip,
+        port=safe_port,
+        hostname=sanitize_label(req.hostname),
         force_update=bool(req.force_update)
     )
 
@@ -631,13 +670,15 @@ async def ws_node_stream(websocket: WebSocket, node_id: str):
                 try:
                     data = json.loads(msg)
                     if data.get("type") == "heartbeat":
+                        ws_ip = validate_speaker_ip(websocket.client.host if websocket.client else "127.0.0.1")
+                        ws_port = validate_speaker_port(data.get("port", 5004))
                         upsert_node_heartbeat(
                             node_id=node_id,
-                            device_name=data.get("device_name"),
-                            ip_address=websocket.client.host if websocket.client else "127.0.0.1",
-                            port=data.get("port", 5004),
+                            device_name=sanitize_label(data.get("device_name")),
+                            ip_address=ws_ip,
+                            port=ws_port,
                             groups=data.get("groups"),
-                            hostname=data.get("hostname", "")
+                            hostname=sanitize_label(data.get("hostname", ""))
                         )
                 except Exception:
                     pass
@@ -655,12 +696,15 @@ def list_speakers():
 
 @app.post("/api/speakers")
 async def add_speaker(s: SpeakerCreate):
+    safe_ip = validate_speaker_ip(s.ip_address)
+    safe_port = validate_speaker_port(s.port)
+    safe_name = sanitize_label(s.name) or "Speaker"
     try:
         grps = parse_groups(s.groups if s.groups is not None else (s.group or s.zone or "Kantor"))
         if not grps:
             grps = ["Kantor"]
-        new_id = create_speaker(s.name, s.ip_address, s.port, groups=grps, zone=grps[0], device_type=s.device_type or "physical")
-        log_event("SPEAKER_ADDED", f"Menambah speaker '{s.name}' ({s.ip_address}) ke group: {', '.join(grps)}")
+        new_id = create_speaker(safe_name, safe_ip, safe_port, groups=grps, zone=grps[0], device_type=s.device_type or "physical")
+        log_event("SPEAKER_ADDED", f"Menambah speaker '{safe_name}' ({safe_ip}) ke group: {', '.join(grps)}")
         await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
         await manager.broadcast({"type": "groups_update", "groups": get_all_groups()})
         await manager.broadcast({"type": "zones_update", "zones": get_all_groups()})
@@ -673,11 +717,14 @@ async def edit_speaker(speaker_id: int, s: SpeakerUpdate):
     existing = get_speaker_by_id(speaker_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Speaker tidak ditemukan")
+    safe_ip = validate_speaker_ip(s.ip_address)
+    safe_port = validate_speaker_port(s.port)
+    safe_name = sanitize_label(s.name) or existing["name"]
     grps = parse_groups(s.groups if s.groups is not None else (s.group or s.zone or "Kantor"))
     if not grps:
         grps = ["Kantor"]
-    update_speaker(speaker_id, s.name, s.ip_address, s.port, groups=grps, zone=grps[0], enabled=s.enabled)
-    log_event("SPEAKER_UPDATED", f"Memperbarui speaker '{s.name}' ({s.ip_address})")
+    update_speaker(speaker_id, safe_name, safe_ip, safe_port, groups=grps, zone=grps[0], enabled=s.enabled)
+    log_event("SPEAKER_UPDATED", f"Memperbarui speaker '{safe_name}' ({safe_ip})")
     await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
     await manager.broadcast({"type": "groups_update", "groups": get_all_groups()})
     await manager.broadcast({"type": "zones_update", "zones": get_all_groups()})
@@ -1012,6 +1059,10 @@ def read_settings():
 
 @app.put("/api/settings")
 def save_settings(payload: dict):
+    if "multicast_ip" in payload and payload["multicast_ip"]:
+        payload["multicast_ip"] = validate_speaker_ip(str(payload["multicast_ip"]))
+    if "multicast_port" in payload and payload["multicast_port"]:
+        payload["multicast_port"] = str(validate_speaker_port(payload["multicast_port"]))
     update_settings(payload)
     return {"message": "Pengaturan disimpan", "settings": get_settings()}
 
@@ -1043,8 +1094,9 @@ if FRONTEND_DIST.exists():
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        file_path = FRONTEND_DIST / full_path
-        if file_path.is_file():
+        dist_root = FRONTEND_DIST.resolve()
+        file_path = (FRONTEND_DIST / full_path).resolve()
+        if dist_root in file_path.parents and file_path.is_file():
             is_static_asset = "/assets/" in full_path or full_path.endswith((".js", ".css", ".ico", ".png", ".svg", ".woff2"))
             headers = {"Cache-Control": "public, max-age=86400"} if is_static_asset else {"Cache-Control": "no-cache"}
             return FileResponse(file_path, headers=headers)
