@@ -23,10 +23,6 @@ class StreamHub:
         q: asyncio.Queue = asyncio.Queue(maxsize=400)  # ~8 detik audio (400 x 20ms)
         token = object()
         with self._lock:
-            # Bersihkan koneksi lama yang stale untuk node_id yang sama
-            stale_tokens = [tok for tok, (nid, _, _) in self._subs.items() if nid == node_id]
-            for tok in stale_tokens:
-                self._subs.pop(tok, None)
             self._subs[token] = (node_id, loop, q)
         return token, q
 
@@ -36,7 +32,7 @@ class StreamHub:
 
     def subscriber_ids(self):
         with self._lock:
-            return [nid for nid, _, _ in self._subs.values()]
+            return list(dict.fromkeys(nid for nid, _, _ in self._subs.values()))
 
     # --- Sisi engine (dipanggil dari thread biasa) ---
     def begin(self, all_nodes: bool = False, nodes: Optional[Set[str]] = None):
