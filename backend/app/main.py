@@ -910,6 +910,14 @@ def list_node_schedules(node_id: str):
         node_id_int = node_spk["id"]
         node_groups = [g.lower() for g in parse_groups(node_spk["groups"] or node_spk["zone"])]
 
+        all_spks = conn.execute("SELECT id, name, groups, zone FROM speakers").fetchall()
+        spk_group_map = {}
+        for sp in all_spks:
+            sp_grps = [g.lower() for g in parse_groups(sp["groups"] or sp["zone"])]
+            if sp["name"]:
+                sp_grps.append(sp["name"].strip().lower())
+            spk_group_map[sp["id"]] = set(sp_grps)
+
         rows = conn.execute("""
             SELECT s.*, a.display_name as audio_title, a.filename as audio_filename, a.duration as audio_duration, a.size as audio_size
             FROM schedules s
@@ -934,7 +942,10 @@ def list_node_schedules(node_id: str):
 
             is_all = (tmode == "all" and not target_groups and not target_speaker_ids)
             group_match = any(g in node_groups for g in target_groups)
-            speaker_match = (node_id_int in target_speaker_ids)
+            speaker_match = (node_id_int in target_speaker_ids) or any(
+                bool(spk_group_map.get(sid, set()) & set(node_groups))
+                for sid in target_speaker_ids
+            )
 
             if is_all or group_match or speaker_match:
                 item = dict(r)

@@ -396,20 +396,21 @@ class AudioReceiver:
 
                     if self.on_heartbeat_change:
                         self.on_heartbeat_change(True, node_data)
-                    if time.time() - self.last_sync_time > 300 or not self.schedules:
+                    if self.last_sync_time == 0 or (time.time() - self.last_sync_time > 300) or (not self.schedules and time.time() - self.last_sync_time > 30):
                         self.sync_schedules_and_media()
                     return True
         except Exception as e:
-            self.server_connected = False
             self.last_heartbeat_error = str(e)
-            if self.on_heartbeat_change:
-                self.on_heartbeat_change(False, {"error": str(e)})
+            if self.stream_sock is None:
+                self.server_connected = False
+                if self.on_heartbeat_change:
+                    self.on_heartbeat_change(False, {"error": str(e)})
 
         return False
 
     def _heartbeat_loop(self):
         """Loop latar belakang mengirim heartbeat setiap 15 detik."""
-        time.sleep(0.5)
+        time.sleep(0.05)
         self.send_heartbeat(force_update=False)
 
         while self.is_running:
@@ -1037,6 +1038,20 @@ class AudioReceiver:
                 self.stream_sock = sock
                 sock.setblocking(False)
                 self.server_connected = True
+                try:
+                    local_ip = sock.getsockname()[0]
+                    if local_ip and not local_ip.startswith("127."):
+                        self.registered_ip = local_ip
+                except Exception:
+                    pass
+                if self.on_heartbeat_change:
+                    self.on_heartbeat_change(True, {
+                        "ip_address": self.registered_ip or "Aktif",
+                        "groups": self.registered_groups or self.groups,
+                        "zone": self.registered_zone or self.zone
+                    })
+                if not self.schedules:
+                    self.sync_schedules_and_media()
                 print(f"[*] IntanWave Node tersambung via WebSocket Audio Stream ({self.server_url})")
 
                 last_ping_time = time.time()

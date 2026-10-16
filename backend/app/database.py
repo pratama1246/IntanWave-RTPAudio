@@ -1,5 +1,6 @@
 import sqlite3
 import json
+from contextlib import contextmanager
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from app.config import DB_PATH
@@ -46,17 +47,25 @@ def parse_groups(val: Any) -> List[str]:
             result.append(clean)
     return result
 
+@contextmanager
 def get_db():
     conn = sqlite3.connect(str(DB_PATH), timeout=10.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA busy_timeout=5000;")
     conn.execute("PRAGMA foreign_keys=ON;")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def init_db():
     with get_db() as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
         cursor = conn.cursor()
         
         # Audio Files
