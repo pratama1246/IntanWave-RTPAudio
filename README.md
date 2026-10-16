@@ -1,54 +1,41 @@
-# 🔊 IntanWave — Industrial IP Audio & Maritime Public Address (PA) System
+# 🔊 IntanWave — Industrial IP Speaker & Maritime Public Address (PA) System
 
 [![Docker Support](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](#-linux-server-deployment-docker-compose)
 [![Python FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React Vite](https://img.shields.io/badge/React%2019-Vite%208-61DAFB?logo=react&logoColor=black)](https://vitejs.dev)
-[![Dual-Stream Audio](https://img.shields.io/badge/Audio-Dual--Stream%20HD%2044.1kHz%20%7C%208kHz-orange)](#-dual-stream-hybrid-audio-engine)
-[![Memory Limit](https://img.shields.io/badge/RAM%20Limit-150MB-green)](#-docker-resource-limits)
 [![RTP Multicast](https://img.shields.io/badge/Audio-RTP%20Multicast%205004-FF6F00)](#-physical-ip-speaker-configuration)
+[![Memory Limit](https://img.shields.io/badge/RAM%20Limit-150MB-green)](#-docker-resource-limits)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**IntanWave** is a centralized, industrial-grade IP Public Address (PA) and automated broadcast system engineered for maritime ports, cargo terminals, industrial facilities, and corporate environments. It delivers synchronized, zero-buffer audio across distributed infrastructures using an innovative **Dual-Stream Hybrid Architecture**: high-fidelity **44.1 kHz PCM audio** for indoor desktop amplifier nodes over direct HTTP, and telecom-standard **8 kHz G.711 A-Law audio** over **RTP Multicast** for outdoor physical IP horn speakers (e.g., Tonmind CS20).
+**IntanWave** is a centralized, industrial-grade IP Public Address (PA) and automated audio broadcast system engineered specifically for maritime ports, cargo terminals, warehouses, and industrial facilities. It delivers synchronized, zero-buffer, multi-zone audio directly to physical IP horn speakers (e.g. Tonmind CS20, SIP/RTP horn speakers) using **RTP Multicast (`239.255.0.1:5004`)** and targeted **Unicast RTP** streams.
 
 ---
 
 ## 🌟 Key Features
 
-### 🎵 Dual-Stream Hybrid Audio Engine
-- **HD PCM Stream (44.1 kHz / 16-bit Mono)**: Streams uncompressed, CD-quality raw PCM audio via a low-latency HTTP pipe (`/api/stream`) to Windows desktop client nodes, delivering crystal-clear speech and rich music to facility amplifiers.
-- **Telecom RTP Stream (8 kHz G.711 A-Law Mono)**: Concurrently encodes and broadcasts VoIP-standard audio over RTP Multicast (`239.255.0.1:5004`) and Unicast to physical IP horn speakers.
-- **Unified Clock Synchronization**: Both streams originate from a single FFmpeg decode pipeline, ensuring zero delay disparity between indoor office nodes and outdoor berth horn speakers.
+### 🎵 High-Performance RTP Streaming Engine
+- **Telecom-Standard Audio (8 kHz G.711 A-Law Mono)**: Direct VoIP/RTP multicast and unicast streaming encoded on-the-fly via FFmpeg for industrial IP speakers.
+- **20ms Strict Frame Slicing**: Audio filters apply strict sample pacing (`aresample=8000:async=1,asetnsamples=n=160`) to eliminate drift and intermittent dropouts on long multi-minute broadcasts.
+- **Locked 172-Byte Datagrams**: RTP payloads are packetized at 160 bytes audio + 12 bytes header (`?pkt_size=172`) matching IP speaker DSP jitter buffers.
 
-### ⏱️ Audio Pacing & Anti-Buffering Engine
-- **20ms Frame Slicing**: Audio filters apply strict sample pacing (`aresample=8000:async=1,asetnsamples=n=160`) to eliminate drift and intermittent dropouts on long multi-minute broadcasts.
-- **Locked 172-Byte Datagrams**: RTP payloads are strictly packetized at 160 bytes audio + 12 bytes header (`?pkt_size=172`) to perfectly align with IP speaker DSP jitter buffers.
+### 🛡️ Multi-Zone Parallel Streaming & Anti-Echo Muxing
+- **Parallel Multi-Zone Streaming**: Non-overlapping speaker zones play simultaneously without interrupting each other.
+- **Shared-SSRC Tee Muxing**: Transmits simultaneous unicast/multicast outputs using a coordinated SSRC (`ssrc={shared_ssrc}:seq=0`) to eliminate echo.
+- **Target Deduplication**: Automatic deduplication of target endpoints across overlapping groups.
+- **Priority Queue**: Higher-priority broadcasts (Darurat/Emergency) cleanly preempt lower-priority audio; concurrent automated schedules wait in a FIFO queue until speakers are free.
 
-### 🛡️ Anti-Echo & Stream Deduplication
-- **Shared-SSRC Tee Muxing**: Transmits all simultaneous outputs using a coordinated SSRC (`ssrc={shared_ssrc}:seq=0`) to eliminate packet collision echoes.
-- **Endpoint Deduplication**: If an IP speaker belongs to multiple overlapping groups or zones, the backend automatically deduplicates targets to prevent redundant stream delivery.
-- **Thread-Safe Playback & Debouncing**: Atomic server-side locks and client UI debouncing prevent accidental double-clicks from disrupting ongoing broadcasts.
-
-### 🆔 Smart Node Discovery & Persistent Identity
-- **Dynamic Auto-Registration**: Windows desktop nodes automatically report hostname, local IP, and audio capabilities to the server on startup.
-- **Stable Hardware Identity (`node_id`)**: Nodes retain a unique GUID in `config.json`. Rebuilding the client or renewing a DHCP IP address cleanly updates the existing database record rather than generating ghost duplicate entries.
-
-### 🚨 Emergency Warning System (EWS) & Safety Modals
-- **Instant Evacuation Siren**: Dedicated red alert trigger to broadcast emergency sirens across all terminals with zero buffer delay.
-- **Broadcast Confirmation Modal**: An explicit confirmation dialog precedes manual playback from the Audio Library table, preventing accidental live broadcasts.
+### 🚨 Emergency Warning System (EWS)
+- **Instant Evacuation Siren**: Dedicated red alert trigger to broadcast emergency sirens across all terminals with zero latency.
+- **Broadcast Confirmation Modal**: An explicit confirmation dialog precedes manual playback from the Audio Library table to prevent accidental live broadcasts.
 
 ### ⏰ Multi-Time Group Broadcast Scheduler
 - **Multiple Broadcast Times per Rule**: Configure single rules with several trigger points (e.g., `07:30`, `11:45`, `14:00`, `16:56`) rendered as high-contrast time badges.
-- **Shift Presets & Ellipsis Truncation**: Quick-fill buttons for common port routines (Morning Muster, Rest Breaks, Shift Closing) with smart `...` truncation for dense lists.
+- **Shift Presets**: Quick-fill buttons for common port routines (Morning Muster, Rest Breaks, Shift Closing).
 - **Dynamic Nearest Countdown**: Live countdown card continuously tracks and displays the time remaining until the next upcoming broadcast.
 
 ### 📡 Real-Time Telemetry & Health Monitoring
-- **Parallel Asynchronous ICMP Ping**: Continuous background heartbeat monitoring tracking latency and online/offline states across all registered IP endpoints.
-- **WebSocket Live State Push**: Telemetry and playback state changes update instantaneously across connected browser consoles without page reloads.
-
-### 💻 Windows Desktop Receiver Client (`IntanWave Node`)
-- **Dual-Channel Multi-Socket Listener**: Concurrently receives broadcasts from the central server and emergency calls from the Control Room VoIP IP Phone (e.g., `239.255.0.2:5004`).
-- **VoIP Codec Auto-Detection**: Inspects incoming RTP RFC 3550 headers to seamlessly decode both **PCMU (`pt=0`)** and **PCMA (`pt=8`)** without audio distortion.
-- **Background Tray & Toast Notifications**: Sits unobtrusively in the Windows System Tray with native Windows Toast alerts indicating stream title and caller identity.
+- **Parallel Asynchronous ICMP Ping**: Continuous background ping monitoring tracking latency and online/offline states across all physical IP speakers.
+- **WebSocket Live State Push**: Telemetry, playback state, and schedules update instantaneously across connected browser consoles without page reloads.
 
 ---
 
@@ -60,24 +47,21 @@ flowchart TD
         WebUI["Web Management Console (React 19 + Tailwind)"] -->|REST / WebSocket| API["FastAPI Backend Engine"]
         API --> Scheduler["APScheduler (Multi-Time Grouping)"]
         API --> DB[(SQLite pa_system.db)]
-        API --> Streamer["FFmpeg Dual-Stream Engine"]
-        Streamer -->|HD 44.1kHz s16le PCM| StreamHub["Direct HTTP Hub (/api/stream)"]
+        API --> Streamer["FFmpeg RTP Engine (G.711 A-law 8kHz)"]
     end
 
     subgraph Network["🌐 Local Network Infrastructure (LAN / VLAN)"]
-        Streamer -->|8kHz G.711 A-Law 20ms| MC[RTP Multicast 239.255.0.1:5004]
-        Streamer -.->|RTP Unicast Direct| UC[Unicast IP Endpoints]
-        IPPhone["Control Room VoIP Phone (239.255.0.2:5004)"] --> MC2[Emergency Voice Stream]
+        Streamer -->|8kHz G.711 A-Law 20ms| MC["RTP Multicast 239.255.0.1:5004"]
+        Streamer -.->|RTP Unicast Direct| UC["Unicast IP Endpoints (10.6.3.x:5004)"]
     end
 
-    subgraph Endpoints["🔊 Broadcast Receiving Endpoints"]
-        MC --> Spk1["Berth Horn Speaker (Tonmind CS20)"]
-        MC --> Spk2["Yard Horn Speaker"]
-        MC --> Spk3["Warehouse Horn Speaker"]
+    subgraph Endpoints["🔊 Physical IP Speakers (Tonmind CS20 / SIP Horns)"]
+        MC --> Spk1["Dermaga 1–6 Berth Horns"]
+        MC --> Spk2["RTK Yard Horns"]
+        MC --> Spk3["Wijayapura & Kantor Horns"]
         UC --> Spk1
-        StreamHub -->|Direct HTTP Stream| WinClient["Windows Desktop Node (IntanWave Node) -> Facility PA"]
-        MC -.->|UDP Fallback| WinClient
-        MC2 -.->|VoIP Priority Override| WinClient
+        UC --> Spk2
+        UC --> Spk3
     end
 ```
 
@@ -89,11 +73,10 @@ flowchart TD
 IntanWave-RTPAudio/
 ├── backend/                       # Primary Backend (Python FastAPI + SQLite + APScheduler)
 │   ├── app/
-│   │   ├── audio_engine.py        # Dual-stream engine (44.1kHz HD PCM & 8kHz RTP), pacing, shared SSRC
-│   │   ├── stream_hub.py          # Asynchronous pub/sub buffer hub for direct HTTP audio streaming
+│   │   ├── audio_engine.py        # RTP stream engine (8kHz G.711 A-law), multi-zone tee muxing, priority queue
 │   │   ├── config.py              # Environment configurations, port mappings, storage paths
-│   │   ├── database.py            # SQLite schema migrations, smart node upsert, audit logging
-│   │   ├── main.py                # REST & WebSocket API, /api/health, /api/stream, auto-discovery
+│   │   ├── database.py            # SQLite schema migrations, speaker definitions, audit logging
+│   │   ├── main.py                # REST & WebSocket API, /api/health, speaker management
 │   │   ├── ping_service.py        # Parallel ICMP ping engine & latency telemetry
 │   │   └── scheduler.py           # APScheduler engine with multi-time trigger support
 │   ├── requirements.txt           # Python backend dependencies
@@ -105,16 +88,6 @@ IntanWave-RTPAudio/
 │   │   └── main.jsx               # React DOM entrypoint
 │   ├── package.json               # Node.js dependencies
 │   └── vite.config.js             # Vite build configuration
-├── client-windows/                # Windows Receiver Client (IntanWave Node)
-│   ├── IntanWave-Node/            # Portable, self-contained distribution folder
-│   │   ├── IntanWave-Node.exe     # Standalone compiled client executable
-│   │   ├── allow_firewall.bat     # Windows Defender UDP port 5004 authorization script
-│   │   └── _internal/             # Python runtime & embedded FFmpeg audio engine
-│   ├── app.py                     # System Tray GUI, settings modal, single-instance enforcement
-│   ├── receiver.py                # Dual-channel RTP/HTTP listener & VoIP codec auto-detection
-│   ├── config.json                # Client configuration (persistent node_id, IP phone, volume)
-│   ├── IntanWave-Node.spec         # PyInstaller build specification (folder mode, UPX disabled)
-│   └── start_client.bat           # Portable client launcher
 ├── Dockerfile                     # Multi-stage container build (Node builder + Python FFmpeg runner)
 ├── docker-compose.yml             # Docker compose specification with host networking & 150MB RAM limit
 ├── deploy-linux.sh                # Automated 1-step deployment script for Linux servers
@@ -149,7 +122,6 @@ docker compose up -d --build
 
 * **Web Console:** `http://<SERVER_IP>:7080`
 * **Health Check API:** `http://<SERVER_IP>:7080/api/health`
-* **Direct Audio Stream:** `http://<SERVER_IP>:7080/api/stream`
 * **Live Server Logs:** `docker compose logs -f`
 
 #### 🛡️ Docker Resource Limits
@@ -185,25 +157,6 @@ pip install -r backend/requirements.txt
 python run_server.py
 ```
 The console will be accessible at: `http://localhost:7080`
-
----
-
-## 💻 Windows Client Setup (`IntanWave Node`)
-
-The client application runs silently on staff workstations or guard post PCs connected to analog facility amplifiers.
-
-### Installation & Launch:
-1. Open the [`client-windows/IntanWave-Node`](client-windows/IntanWave-Node) folder.
-2. *(First run only)* Right-click **`allow_firewall.bat`** ➔ **Run as administrator** to permit inbound UDP port 5004 traffic through Windows Defender Firewall.
-3. Launch **`IntanWave-Node.exe`** (or execute `start_client.bat`).
-4. The application docks quietly in the **System Tray** (near the Windows taskbar clock).
-
-### Dual-Channel Receiver Capabilities:
-* **Primary Audio Channel (Direct HTTP + Multicast Fallback)**: Streams **CD-Quality 44.1 kHz raw PCM** audio from the central server with zero packet dropouts across subnets and corporate firewalls.
-* **Emergency IP Phone Channel (VoIP Priority)**: Concurrently listens for broadcast calls from the Control Room IP Phone (e.g., `239.255.0.2:5004`).
-* **VoIP Codec Auto-Detection**: Automatically inspects RTP RFC 3550 headers to decode **PCMU (`pt=0`)** and **PCMA (`pt=8`)** streams on-the-fly without distortion.
-* **Smart Auto-Registration**: Automatically registers with the server under a persistent hardware `node_id`, preventing duplicate ghost nodes when reconnecting or renewing DHCP IPs.
-* **Native Windows Toast**: Instant push notifications display broadcast details and emergency caller labels.
 
 ---
 

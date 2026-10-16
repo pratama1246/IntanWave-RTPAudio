@@ -219,8 +219,8 @@ def init_db():
         if "groups" not in speaker_cols:
             cursor.execute("ALTER TABLE speakers ADD COLUMN groups TEXT DEFAULT '[]'")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_speakers_node_id ON speakers(node_id) WHERE node_id IS NOT NULL")
+        cursor.execute("DELETE FROM speakers WHERE device_type = 'node' OR node_id IS NOT NULL OR ip_address LIKE 'pending-%'")
 
-        # Pastikan kolom groups terisi dari zone jika ada speaker lama
         sp_rows = cursor.execute("SELECT id, zone, groups FROM speakers").fetchall()
         for sp in sp_rows:
             curr_grps = parse_groups(sp["groups"])
@@ -358,22 +358,15 @@ def delete_speaker(speaker_id: int):
         conn.execute("DELETE FROM speakers WHERE id = ?", (speaker_id,))
         conn.commit()
 
-def update_speaker_status(speaker_id: int, status: str, latency_ms: int = 0, is_node: bool = False):
+def update_speaker_status(speaker_id: int, status: str, latency_ms: int = 0):
     with get_db() as conn:
         now = datetime.now().isoformat()
         if status == "online":
-            if is_node:
-                conn.execute("""
-                    UPDATE speakers 
-                    SET status = ?, latency_ms = ?, last_checked = ? 
-                    WHERE id = ?
-                """, (status, latency_ms, now, speaker_id))
-            else:
-                conn.execute("""
-                    UPDATE speakers 
-                    SET status = ?, latency_ms = ?, last_online = ?, last_checked = ? 
-                    WHERE id = ?
-                """, (status, latency_ms, now, now, speaker_id))
+            conn.execute("""
+                UPDATE speakers 
+                SET status = ?, latency_ms = ?, last_online = ?, last_checked = ? 
+                WHERE id = ?
+            """, (status, latency_ms, now, now, speaker_id))
         else:
             conn.execute("""
                 UPDATE speakers 
@@ -381,174 +374,6 @@ def update_speaker_status(speaker_id: int, status: str, latency_ms: int = 0, is_
                 WHERE id = ?
             """, (status, now, speaker_id))
         conn.commit()
-
-# --- AUTO-DISCOVERY & DYNAMIC NODE HEARTBEAT ---
-def upsert_node_heartbeat(
-    node_id: str,
-    device_name: str,
-    zone: str = "Kantor",
-    groups: Any = None,
-    ip_address: str = "",
-    port: int = 5004,
-    hostname: str = "",
-    force_update: bool = False
-) -> Dict[str, Any]:
-    """
-    Mendaftarkan atau memperbarui status node client PC Windows secara dinamis.
-    Mendukung multi-group, perubahan IP akibat DHCP tanpa benturan SQLite UNIQUE constraint.
-    """
-    node_id = (node_id or "").strip()
-    if not node_id:
-        raise ValueError("node_id tidak boleh kosong")
-
-    grp_list = parse_groups(groups) if groups is not None else parse_groups(zone)
-    if not grp_list:
-        grp_list = ["Kantor"]
-    primary_group = grp_list[0]
-    grp_json = json.dumps(grp_list)
-
-    # Format device name agar tidak kembar: sertakan hostname jika device_name default/generic atau bentrok
-    is_generic_name = not device_name or device_name.strip() in (
-        "Terminal Audio Node (Amplifier)",
-        "Terminal Audio Node",
-        "Terminal Audio",
-        "PC Audio"
-    )
-    if hostname and (is_generic_name or (device_name.startswith("Terminal Audio (") and not device_name.endswith(f"({hostname})"))):
-        device_name = f"Terminal Audio ({hostname})"
-    else:
-        device_name = (device_name or f"Terminal Audio ({hostname or node_id})").strip()
-    now = datetime.now().isoformat()
-
-    with get_db() as conn:
-        cursor = conn.cursor()
-
-        # 1. Pastikan setiap group terdaftar
-        for g in grp_list:
-            cursor.execute("INSERT OR IGNORE INTO groups (name) VALUES (?)", (g,))
-            cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (g,))
-
-        # 2. Cari apakah record node ini sudah ada di database
-        #    Cek bertahap:
-        #    a. Berdasarkan node_id yang sama persis
-        #    b. ATAU berdasarkan hostname PC yang sama persis (jika node_id sempat berubah karena rebuild/reinstall)
-        #    c. ATAU berdasarkan ip_address yang sama (khusus device_type = 'node')
-        cursor.execute("SELECT * FROM speakers WHERE node_id = ?", (node_id,))
-        existing = cursor.fetchone()
-
-        if not existing and hostname:
-            cursor.execute(
-                "SELECT * FROM speakers WHERE device_type = 'node' AND LOWER(hostname) = LOWER(?) ORDER BY id DESC LIMIT 1",
-                (hostname,)
-            )
-            existing = cursor.fetchone()
-
-        if not existing and ip_address:
-            cursor.execute(
-                "SELECT * FROM speakers WHERE device_type = 'node' AND ip_address = ? ORDER BY id DESC LIMIT 1",
-                (ip_address,)
-            )
-            existing = cursor.fetchone()
-
-        # 3. Tangani benturan IP pada record LAIN (misal IP speaker fisik yang sama atau record lama yang bukan existing ini)
-        target_id = existing["id"] if existing else -1
-        cursor.execute(
-            "SELECT id, device_type FROM speakers WHERE ip_address = ? AND id != ?",
-            (ip_address, target_id)
-        )
-        conflicts = cursor.fetchall()
-        for conf in conflicts:
-            c_id = conf["id"]
-            if conf["device_type"] == "node":
-                # Jika record lama yang berbenturan juga PC Node (duplikat lama), hapus agar database selalu bersih!
-                cursor.execute("DELETE FROM speakers WHERE id = ?", (c_id,))
-            else:
-                cursor.execute(
-                    "UPDATE speakers SET ip_address = ?, status = 'offline' WHERE id = ?",
-                    (f"pending-{c_id}-{int(datetime.now().timestamp())}", c_id)
-                )
-
-        if existing:
-            speaker_id = existing["id"]
-            curr_name = existing["name"] or ""
-            should_update_name = (force_update or not curr_name or curr_name in (
-                "Terminal Audio Node (Amplifier)",
-                "Terminal Audio Node",
-                "Terminal Audio",
-                "PC Audio"
-            ))
-            final_name = device_name if (force_update or not curr_name) else (
-                f"Terminal Audio ({hostname})" if should_update_name and hostname else curr_name
-            )
-
-            cursor.execute("""
-                UPDATE speakers
-                SET name = ?,
-                    ip_address = ?,
-                    port = ?,
-                    node_id = ?,
-                    hostname = ?,
-                    status = 'online',
-                    latency_ms = 1,
-                    last_online = ?,
-                    last_checked = ?,
-                    device_type = 'node'
-                WHERE id = ?
-            """, (final_name, ip_address, port, node_id, hostname, now, now, speaker_id))
-        else:
-            cursor.execute("""
-                INSERT INTO speakers (
-                    name, ip_address, port, zone, groups, status, latency_ms,
-                    last_online, last_checked, enabled, node_id, device_type, hostname
-                )
-                VALUES (?, ?, ?, ?, ?, 'online', 1, ?, ?, 1, ?, 'node', ?)
-            """, (device_name, ip_address, port, primary_group, grp_json, now, now, node_id, hostname))
-            speaker_id = cursor.lastrowid
-
-        # 4. Pembersihan otomatis: Hapus duplikat record node lain dengan hostname yang sama atau pending IP
-        if hostname:
-            cursor.execute(
-                "DELETE FROM speakers WHERE device_type = 'node' AND id != ? AND LOWER(hostname) = LOWER(?)",
-                (speaker_id, hostname)
-            )
-        cursor.execute("DELETE FROM speakers WHERE device_type = 'node' AND ip_address LIKE 'pending-%'")
-        conn.commit()
-
-        cursor.execute("SELECT * FROM speakers WHERE id = ?", (speaker_id,))
-        row = cursor.fetchone()
-        if not row:
-            return {}
-        d = dict(row)
-        d["groups"] = parse_groups(d.get("groups") or d.get("zone"))
-        d["zone"] = d["groups"][0] if d["groups"] else (d.get("zone") or "")
-        return d
-
-def mark_stale_nodes_offline(timeout_seconds: int = 90) -> int:
-    """Menandai node PC client yang tidak mengirim heartbeat melebihi timeout (90 detik) menjadi offline."""
-    now = datetime.now()
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, last_online FROM speakers WHERE device_type = 'node' AND status = 'online'")
-        rows = cursor.fetchall()
-        stale_ids = []
-        for r in rows:
-            last_online_str = r["last_online"]
-            if not last_online_str:
-                stale_ids.append(r["id"])
-                continue
-            try:
-                last_dt = datetime.fromisoformat(last_online_str)
-                if (now - last_dt).total_seconds() > timeout_seconds:
-                    stale_ids.append(r["id"])
-            except Exception:
-                stale_ids.append(r["id"])
-
-        if stale_ids:
-            placeholders = ",".join(["?"] * len(stale_ids))
-            cursor.execute(f"UPDATE speakers SET status = 'offline', latency_ms = 0 WHERE id IN ({placeholders})", stale_ids)
-            conn.commit()
-            return len(stale_ids)
-        return 0
 
 # --- GROUPS & ZONES CRUD ---
 def get_all_groups() -> List[Dict[str, Any]]:

@@ -1,4 +1,0 @@
-D:\Project-Web\audio-server-ip-speaker\client-csharp\bin\Release\net8.0-windows\win-x64\publish\IntanWave-Node.pdb
-D:\Project-Web\audio-server-ip-speaker\client-csharp\bin\Release\net8.0-windows\win-x64\publish\Assets\app_icon.png
-D:\Project-Web\audio-server-ip-speaker\client-csharp\bin\Release\net8.0-windows\win-x64\publish\Assets\test_chime.wav
-D:\Project-Web\audio-server-ip-speaker\client-csharp\bin\Release\net8.0-windows\win-x64\publish\IntanWave-Node.exe

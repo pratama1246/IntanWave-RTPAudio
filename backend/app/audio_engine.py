@@ -7,8 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Set, Tuple
 from app.config import DEFAULT_MULTICAST_IP, DEFAULT_MULTICAST_PORT, AUDIO_DIR
-from app.database import log_event, get_settings, get_db
-from app.stream_hub import stream_hub
+from app.database import log_event, get_settings
 
 
 @dataclass
@@ -26,12 +25,9 @@ class PlaybackSession:
     target_desc: str
     target_endpoints: Optional[List[str]]
     footprint: Set[str]
-    http_all: bool
-    http_nodes: Set[str]
     multicast_proc: Optional[subprocess.Popen] = None
     local_proc: Optional[subprocess.Popen] = None
     stop_event: threading.Event = field(default_factory=threading.Event)
-    pump_thread: Optional[threading.Thread] = None
     monitor_thread: Optional[threading.Thread] = None
 
 
@@ -60,7 +56,7 @@ def get_audio_priority(category: str, filename: str = "", title: str = "") -> in
     if cat == "biasa":
         return 3
 
-    # Fallback to keyword matching if category is unset or unrecognized
+    # Fallback keyword matching
     fn = (filename or "").lower()
     tt = (title or "").lower()
     combined = f"{cat} {fn} {tt}"
@@ -72,9 +68,6 @@ def get_audio_priority(category: str, filename: str = "", title: str = "") -> in
 
 
 def footprints_overlap(fp1: Set[str], fp2: Set[str]) -> bool:
-    if ("ALL_HTTP" in fp1 and any(k.startswith("node:") or k == "ALL_HTTP" for k in fp2)) or \
-       ("ALL_HTTP" in fp2 and any(k.startswith("node:") or k == "ALL_HTTP" for k in fp1)):
-        return True
     if ("ALL_RTP" in fp1 and any(k.startswith("rtp:") or k == "ALL_RTP" for k in fp2)) or \
        ("ALL_RTP" in fp2 and any(k.startswith("rtp:") or k == "ALL_RTP" for k in fp1)):
         return True
@@ -168,16 +161,6 @@ class AudioEngine:
                 enable_loc = False
                 target_desc = "Semua Speaker"
 
-            self.status = status_str
-            self.current_title = title
-            self.current_file = filename
-            self.current_category = category
-            self.duration = duration
-            self.elapsed = elapsed_val
-            self.enable_multicast = enable_mc
-            self.enable_local = enable_loc
-            self.target_desc = target_desc
-
             active_list = []
             for s in self.active_sessions.values():
                 s_elapsed = min(time.time() - s.started_at, s.duration) if s.started_at > 0 else 0.0
@@ -233,39 +216,24 @@ class AudioEngine:
         enable_local: bool,
         target_endpoints: Optional[List[str]],
         mc_ip: str,
-        mc_port: str,
-        node_by_ip: dict
-    ) -> Tuple[Set[str], bool, Set[str], List[str]]:
+        mc_port: str
+    ) -> Tuple[Set[str], List[str]]:
         footprint: Set[str] = set()
-        http_all = False
-        http_nodes: Set[str] = set()
-        rtp_list: List[str] = []
-
         mc_ep = f"{mc_ip}:{mc_port}"
         rtp_endpoints = list(dict.fromkeys(target_endpoints)) if target_endpoints else None
 
         if rtp_endpoints is not None and mc_ep not in rtp_endpoints:
-            kept = []
             for ep in rtp_endpoints:
-                ip = ep.split(":")[0]
-                if ip in node_by_ip:
-                    nid = node_by_ip[ip]
-                    http_nodes.add(nid)
-                    footprint.add(f"node:{nid}")
-                else:
-                    kept.append(ep)
-                    footprint.add(f"rtp:{ep}")
-            rtp_list = list(dict.fromkeys(kept))
-        elif enable_multicast or (rtp_endpoints is not None and mc_ep in rtp_endpoints):
-            http_all = True
-            footprint.add("ALL_HTTP")
+                footprint.add(f"rtp:{ep}")
+            rtp_list = rtp_endpoints
+        else:
             footprint.add("ALL_RTP")
             rtp_list = [mc_ep]
 
         if enable_local:
             footprint.add("LOCAL")
 
-        return footprint, http_all, http_nodes, rtp_list
+        return footprint, rtp_list
 
     def play(
         self,
@@ -302,15 +270,13 @@ class AudioEngine:
         loc_enabled = enable_local if enable_local is not None else (settings.get("enable_local", "false") == "true")
         desc = target_desc or "Semua Speaker"
         cat = category or "biasa"
-        node_map = self._get_node_ip_map()
 
-        footprint, http_all, http_nodes, rtp_list = self._calculate_footprint(
+        footprint, rtp_list = self._calculate_footprint(
             enable_multicast=mc_enabled,
             enable_local=loc_enabled,
             target_endpoints=target_endpoints,
             mc_ip=mc_ip,
-            mc_port=mc_port,
-            node_by_ip=node_map
+            mc_port=mc_port
         )
 
         prio = get_audio_priority(cat, path_obj.name, title)
@@ -319,7 +285,7 @@ class AudioEngine:
         with self._lock:
             overlapping = [s for s in self.active_sessions.values() if footprints_overlap(s.footprint, footprint)]
 
-            # Anti double-click: abaikan jika klik manual berulang file yang sama ke target yang sama dalam tempo < 0.8s
+            # Anti double-click
             if is_manual:
                 for s in overlapping:
                     if s.file_name == path_obj.name and (now - s.started_at < 0.8):
@@ -369,10 +335,7 @@ class AudioEngine:
                 target_desc=desc,
                 target_endpoints=target_endpoints,
                 footprint=footprint,
-                http_all=http_all,
-                http_nodes=http_nodes,
-                rtp_list=rtp_list,
-                playback_mode=playback_mode
+                rtp_list=rtp_list
             )
 
         self.notify_listeners()
@@ -390,10 +353,7 @@ class AudioEngine:
         target_desc: str,
         target_endpoints: Optional[List[str]],
         footprint: Set[str],
-        http_all: bool,
-        http_nodes: Set[str],
-        rtp_list: List[str],
-        playback_mode: Optional[str] = None
+        rtp_list: List[str]
     ) -> str:
         session_id = uuid.uuid4().hex[:8]
         duration = self.get_audio_duration(file_path)
@@ -412,33 +372,8 @@ class AudioEngine:
             enable_local=enable_local,
             target_desc=target_desc,
             target_endpoints=target_endpoints,
-            footprint=footprint,
-            http_all=http_all,
-            http_nodes=http_nodes
+            footprint=footprint
         )
-
-        has_ws_targets = http_all or bool(http_nodes)
-        use_ws_stream = has_ws_targets and (playback_mode == "stream")
-
-        # 1. Bersihkan chunk audio lama dari stream_hub dan kirim sinyal trigger JSON ke PC client nodes
-        if has_ws_targets:
-            stream_hub.begin(all_nodes=http_all, nodes=http_nodes)
-            # ponytail: delay client only when hardware RTP speakers are also targeted (matches ~700ms horn buffer)
-            sync_delay = 400 if bool(rtp_list) else 0
-            stream_hub.publish_event(
-                {
-                    "action": "play",
-                    "session_id": session_id,
-                    "filename": file_name,
-                    "title": title,
-                    "category": category,
-                    "duration": duration,
-                    "playback_mode": playback_mode or "cache",
-                    "delay_ms": sync_delay
-                },
-                all_nodes=http_all,
-                nodes=http_nodes
-            )
 
         net_cmd_args = []
         if rtp_list:
@@ -464,22 +399,6 @@ class AudioEngine:
                     "-f", "tee", "|".join(slaves)
                 ])
 
-        # 2. Pipe audio stream biner MP3 44.1kHz HANYA jika mode Direct Streaming ('stream') diminta
-        if use_ws_stream:
-            net_cmd_args.extend([
-                "-map", "0:a",
-                "-af", "aresample=44100:async=1",
-                "-c:a", "libmp3lame",
-                "-b:a", "128k",
-                "-ac", "1",
-                "-ar", "44100",
-                "-f", "mp3",
-                "-write_xing", "0",
-                "-id3v2_version", "0",
-                "-flush_packets", "1",
-                "pipe:1"
-            ])
-
         if net_cmd_args:
             net_cmd = [
                 "ffmpeg", "-re", "-y",
@@ -489,22 +408,11 @@ class AudioEngine:
             try:
                 session.multicast_proc = subprocess.Popen(
                     net_cmd,
-                    stdout=subprocess.PIPE if use_ws_stream else subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    bufsize=0 if use_ws_stream else -1,
                     creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
                 )
-                if use_ws_stream:
-                    t_pump = threading.Thread(
-                        target=self._pump_session_stream,
-                        args=(session,),
-                        daemon=True
-                    )
-                    session.pump_thread = t_pump
-                    t_pump.start()
             except Exception as e:
-                if use_ws_stream:
-                    stream_hub.end(all_nodes=http_all, nodes=http_nodes, flush=True)
                 log_event("RTP_ERROR", f"Gagal menjalankan ffmpeg stream sesi {session_id}: {e}", level="ERROR")
 
         if enable_local:
@@ -535,31 +443,6 @@ class AudioEngine:
         log_event("PLAYBACK_STARTED", f"Memutar '{title}' -> {target_desc} (P{priority}, Sesi={session_id})")
         return session_id
 
-    def _pump_session_stream(self, session: PlaybackSession):
-        """Membaca MP3 dari stdout FFmpeg sesi ini dan membagikan secara spesifik ke node targetnya."""
-        proc = session.multicast_proc
-        if not proc or not proc.stdout:
-            return
-        try:
-            while not session.stop_event.is_set():
-                chunk = proc.stdout.read(4096)
-                if not chunk:
-                    break
-                stream_hub.publish(
-                    chunk,
-                    all_nodes=session.http_all,
-                    nodes=session.http_nodes
-                )
-        except Exception:
-            pass
-        finally:
-            if not session.stop_event.is_set():
-                stream_hub.end(
-                    all_nodes=session.http_all,
-                    nodes=session.http_nodes,
-                    flush=False
-                )
-
     def _monitor_session(self, session: PlaybackSession):
         """Thread background pemantau progres dan deteksi selesainya sesi pemutaran tertentu."""
         while not session.stop_event.is_set():
@@ -578,12 +461,10 @@ class AudioEngine:
             self.notify_listeners()
 
         with self._lock:
-            self._cleanup_session_procs(session, flush=False)
+            self._cleanup_session_procs(session)
             was_active = self.active_sessions.pop(session.session_id, None) is not None
             if was_active and not session.stop_event.is_set():
                 log_event("PLAYBACK_FINISHED", f"Selesai memutar '{session.title}' (Sesi={session.session_id})")
-                # Catatan: JANGAN mengirim action='stop' saat FINISHED alami agar ffplay lokal di PC client
-                # menyelesaikan pemutaran sampai detik terakhir tanpa terpotong.
 
             self._process_queue_locked()
 
@@ -594,21 +475,11 @@ class AudioEngine:
         if not session:
             return
         session.stop_event.set()
-        if session.http_all or bool(session.http_nodes):
-            stream_hub.publish_event(
-                {
-                    "action": "stop",
-                    "session_id": session_id,
-                    "reason": reason
-                },
-                all_nodes=session.http_all,
-                nodes=session.http_nodes
-            )
-        self._cleanup_session_procs(session, flush=True)
+        self._cleanup_session_procs(session)
         if reason == "STOPPED":
             log_event("PLAYBACK_STOPPED", f"Siaran dihentikan manual: '{session.title}' (Sesi={session_id})")
 
-    def _cleanup_session_procs(self, session: PlaybackSession, flush: bool = False):
+    def _cleanup_session_procs(self, session: PlaybackSession):
         for proc in [session.multicast_proc, session.local_proc]:
             if proc is not None:
                 try:
@@ -621,8 +492,6 @@ class AudioEngine:
                         pass
         session.multicast_proc = None
         session.local_proc = None
-        if flush:
-            stream_hub.end(all_nodes=session.http_all, nodes=session.http_nodes, flush=True)
 
     def _process_queue_locked(self):
         """Mengecek antrean playback dan menjalankan item yang speaker targetnya sudah bebas."""
@@ -639,18 +508,16 @@ class AudioEngine:
             )
             if not overlaps:
                 try:
-                    node_map = self._get_node_ip_map()
                     settings = get_settings()
                     mc_ip = settings.get("multicast_ip", DEFAULT_MULTICAST_IP)
                     mc_port = settings.get("multicast_port", str(DEFAULT_MULTICAST_PORT))
 
-                    footprint, http_all, http_nodes, rtp_list = self._calculate_footprint(
+                    footprint, rtp_list = self._calculate_footprint(
                         enable_multicast=bool(candidate.enable_multicast),
                         enable_local=bool(candidate.enable_local),
                         target_endpoints=candidate.target_endpoints,
                         mc_ip=mc_ip,
-                        mc_port=mc_port,
-                        node_by_ip=node_map
+                        mc_port=mc_port
                     )
 
                     path_obj = Path(candidate.file_path)
@@ -667,8 +534,6 @@ class AudioEngine:
                         target_desc=candidate.target_desc or "Semua Speaker",
                         target_endpoints=candidate.target_endpoints,
                         footprint=footprint,
-                        http_all=http_all,
-                        http_nodes=http_nodes,
                         rtp_list=rtp_list
                     )
                 except Exception as e:
@@ -681,14 +546,11 @@ class AudioEngine:
     def stop(self):
         """Menghentikan seluruh pemutaran audio di semua zona dan mengosongkan antrean."""
         with self._lock:
-            # Kirim stop event ke semua node WebSocket terlebih dahulu
-            stream_hub.publish_event({"action": "stop", "session_id": "all", "reason": "GLOBAL_STOP"}, all_nodes=True)
             for s in list(self.active_sessions.values()):
                 s.stop_event.set()
-                self._cleanup_session_procs(s, flush=False)
+                self._cleanup_session_procs(s)
             self.active_sessions.clear()
             self.playback_queue.clear()
-            stream_hub.end(all_nodes=True, flush=True)
 
             self.status = "IDLE"
             self.current_title = ""
@@ -720,11 +582,11 @@ class AudioEngine:
                 return True
             return False
 
-    def test_speaker_audio(self, ip: str, port: int = 5004, node_id: Optional[str] = None):
-        """Memutar jingle test pendek langsung ke satu speaker tertentu via UDP RTP atau WebSocket trigger."""
+    def test_speaker_audio(self, ip: str, port: int = 5004):
+        """Memutar jingle test pendek langsung ke satu IP speaker fisik tertentu via UDP RTP."""
         with self._lock:
             now = time.time()
-            cooldown_key = f"{ip}:{node_id or ''}"
+            cooldown_key = f"{ip}:{port}"
             if cooldown_key in self._last_test_cooldown and (now - self._last_test_cooldown[cooldown_key] < 1.0):
                 return
             self._last_test_cooldown[cooldown_key] = now
@@ -732,29 +594,6 @@ class AudioEngine:
             chime_path = AUDIO_DIR / "test_chime.wav"
             if not chime_path.exists():
                 raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
-
-        # Jika target adalah PC node, hentikan sesi aktif yang sedang streaming ke PC ini dan kirimkan trigger test
-        node_by_ip = self._get_node_ip_map()
-        target_nid = node_id or node_by_ip.get(ip)
-        if target_nid:
-            with self._lock:
-                for s in list(self.active_sessions.values()):
-                    if s.http_all or (s.http_nodes and target_nid in s.http_nodes):
-                        self._stop_session_locked(s.session_id, reason="TEST_OVERRIDE")
-
-            stream_hub.publish_event(
-                {
-                    "action": "test",
-                    "session_id": f"test_{uuid.uuid4().hex[:6]}",
-                    "filename": "test_chime.wav",
-                    "title": "Uji Suara Speaker",
-                    "category": "biasa",
-                    "duration": 2.0
-                },
-                nodes={target_nid}
-            )
-            log_event("TEST_AUDIO", f"Mengirimkan uji suara WebSocket trigger ke node PC {target_nid} ({ip})")
-            return
 
         rtp_url = f"rtp://{ip}:{port}?pkt_size=172"
         cmd = [
@@ -777,19 +616,6 @@ class AudioEngine:
         except Exception as e:
             log_event("TEST_AUDIO_ERROR", f"Gagal uji suara ke {ip}: {e}", level="ERROR")
             raise e
-
-    @staticmethod
-    def _get_node_ip_map() -> dict:
-        """Peta IP -> node_id untuk PC client Windows (node) yang aktif."""
-        try:
-            with get_db() as conn:
-                rows = conn.execute(
-                    "SELECT ip_address, node_id FROM speakers "
-                    "WHERE enabled = 1 AND device_type = 'node' AND node_id IS NOT NULL AND node_id != ''"
-                ).fetchall()
-            return {r["ip_address"]: r["node_id"] for r in rows}
-        except Exception:
-            return {}
 
 
 audio_engine = AudioEngine()

@@ -5,7 +5,7 @@ import {
   Siren, HardHat, Copy, History, X, Search, 
   Wifi, Activity, Check, Calendar,
   Headphones, Pause,
-  Layers, Edit2, AlertTriangle, ArrowRight, Laptop, Users
+  Layers, Edit2, AlertTriangle, ArrowRight, Users
 } from 'lucide-react';
 
 const DAYS_CONFIG = [
@@ -538,19 +538,9 @@ function MultiTargetSelector({
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-slate-400'}`} />
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="truncate">{spk.name}</span>
-                            {spk.hostname && (
-                              <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                                • {spk.hostname}
-                              </span>
-                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {spk.device_type === 'node' && (
-                            <span className="text-[9px] px-1 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">
-                              PC
-                            </span>
-                          )}
                           <span className="text-[10px] text-slate-400 font-mono">
                             {spk.ip_address}
                           </span>
@@ -2943,25 +2933,16 @@ export default function App() {
                               <span className={`w-1.5 h-1.5 rounded-full ${
                                 isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
                               }`} />
-                              <span>{isOnline ? (s.device_type === 'node' ? 'Online DHCP' : `${s.latency_ms || 1}ms`) : 'Offline'}</span>
+                              <span>{isOnline ? `${s.latency_ms || 1}ms` : 'Offline'}</span>
                             </span>
                           </td>
                           <td className="py-2 px-3 font-semibold text-slate-900 whitespace-nowrap">
                             <div className="flex items-center gap-2">
-                              {s.device_type === 'node' ? (
-                                <span className="p-1 rounded bg-indigo-50 text-indigo-600 shrink-0" title="PC Audio Node Windows">
-                                  <Laptop className="w-3.5 h-3.5" />
-                                </span>
-                              ) : (
-                                <span className="p-1 rounded bg-slate-100 text-slate-500 shrink-0" title="IP Horn Speaker Fisik">
-                                  <Volume2 className="w-3.5 h-3.5" />
-                                </span>
-                              )}
+                              <span className="p-1 rounded bg-slate-100 text-slate-500 shrink-0" title="IP Horn Speaker Fisik">
+                                <Volume2 className="w-3.5 h-3.5" />
+                              </span>
                               <div className="min-w-0">
                                 <span className="block truncate">{s.name}</span>
-                                {s.hostname && (
-                                  <span className="block text-[10px] text-slate-400 font-normal truncate">{s.hostname}</span>
-                                )}
                               </div>
                             </div>
                           </td>
@@ -3067,7 +3048,7 @@ export default function App() {
                 <h3 className="text-base font-semibold text-slate-900">
                   {editingSpeaker ? 'Edit Konfigurasi Speaker' : 'Tambah Speaker Baru'}
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">Pengaturan perangkat IP Horn atau Node Client</p>
+                <p className="text-xs text-slate-500 mt-0.5">Pengaturan perangkat IP Speaker Fisik</p>
               </div>
               <button onClick={() => setShowSpeakerModal(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-4.5 h-4.5" />
@@ -3271,8 +3252,8 @@ export default function App() {
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
                   {playConfirmAudio.category === 'darurat'
-                    ? 'Peringatan: Berkas audio ini berkategori Darurat dan akan disiarkan ke speaker fisik luar / PC Node.'
-                    : 'Audio ini akan disiarkan langsung ke speaker fisik & PC Node sesuai target siaran yang aktif.'}
+                    ? 'Peringatan: Berkas audio ini berkategori Darurat dan akan disiarkan langsung ke speaker IP fisik.'
+                    : 'Audio ini akan disiarkan langsung ke speaker IP fisik sesuai target siaran yang aktif.'}
                 </p>
               </div>
               <button 

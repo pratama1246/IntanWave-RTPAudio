@@ -23,13 +23,11 @@ from app.database import (
     init_db, get_db, log_event, get_settings, update_settings,
     get_all_speakers, get_speaker_by_id, create_speaker, update_speaker, 
     delete_speaker, update_speaker_status,
-    upsert_node_heartbeat, mark_stale_nodes_offline,
     get_all_groups, create_group, update_group, delete_group,
     get_all_zones, create_zone, update_zone, delete_zone,
     parse_groups
 )
 from app.audio_engine import audio_engine
-from app.stream_hub import stream_hub
 from app.scheduler import scheduler, reload_schedules, trigger_schedule_job
 from app.ping_service import ping_ip, scan_all_speakers_parallel, ping_monitor
 
@@ -230,7 +228,6 @@ async def upload_audio(
 
     log_event("AUDIO_UPLOADED", f"Berhasil mengunggah '{disp_name}' [{cat.upper()}] ({safe_filename})")
     await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
-    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Upload berhasil", "filename": safe_filename, "category": cat}
 
 @app.patch("/api/audio/{audio_id}")
@@ -261,7 +258,6 @@ async def update_audio_info(audio_id: int, req: AudioUpdateRequest):
             log_event("AUDIO_UPDATED", f"Memperbarui audio ID {audio_id}: [{cat.upper() if cat else row['category'].upper()}] {sanitize_label(req.display_name) or row['display_name']}")
             
     await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
-    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Audio berhasil diperbarui"}
 
 @app.delete("/api/audio/{audio_id}")
@@ -283,7 +279,6 @@ async def delete_audio(audio_id: int):
 
     log_event("AUDIO_DELETED", f"Menghapus audio: '{row['display_name']}'")
     await manager.broadcast({"type": "audio_update", "audio_list": list_audio()})
-    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Audio berhasil dihapus"}
 
 @app.get("/api/audio/{audio_id}/stream")
@@ -491,204 +486,7 @@ class SpeakerUpdate(BaseModel):
     enabled: int = 1
     device_type: Optional[str] = "physical"
 
-class NodeHeartbeatRequest(BaseModel):
-    node_id: str
-    device_name: Optional[str] = None
-    groups: Optional[List[str]] = None
-    group: Optional[str] = None
-    zone: Optional[str] = None
-    port: Optional[int] = 5004
-    hostname: Optional[str] = None
-    client_ip: Optional[str] = None
-    force_update: Optional[bool] = False
 
-@app.post("/api/nodes/heartbeat")
-async def node_heartbeat(req: NodeHeartbeatRequest, request: Request):
-    """
-    Endpoint deteksi otomatis (auto-discovery) dan heartbeat dinamis untuk PC client Windows (DHCP).
-    Merekam IP aktif pengirim secara otomatis dan menyinkronkan dengan database server.
-    """
-    client_ip = request.headers.get("X-Forwarded-For")
-    if client_ip:
-        client_ip = client_ip.split(",")[0].strip()
-    elif request.headers.get("X-Real-IP"):
-        client_ip = request.headers.get("X-Real-IP").strip()
-    elif request.client and request.client.host:
-        client_ip = request.client.host
-    else:
-        client_ip = ""
-
-    if (client_ip in ("127.0.0.1", "localhost", "::1", "") and req.client_ip):
-        client_ip = req.client_ip
-    elif not client_ip:
-        client_ip = req.client_ip or "127.0.0.1"
-
-    safe_ip = validate_speaker_ip(client_ip)
-    safe_port = validate_speaker_port(req.port or 5004)
-
-    node = upsert_node_heartbeat(
-        node_id=req.node_id,
-        device_name=sanitize_label(req.device_name),
-        groups=req.groups or req.group or req.zone,
-        zone=req.zone or "",
-        ip_address=safe_ip,
-        port=safe_port,
-        hostname=sanitize_label(req.hostname),
-        force_update=bool(req.force_update)
-    )
-
-    # Broadcast pembaruan speaker & group secara asinkron ke Web Dashboard agar tidak memblok response client
-    async def _async_broadcast_updates():
-        try:
-            await manager.broadcast({
-                "type": "speakers_update",
-                "speakers": get_all_speakers()
-            })
-            await manager.broadcast({
-                "type": "groups_update",
-                "groups": get_all_groups()
-            })
-            await manager.broadcast({
-                "type": "zones_update",
-                "zones": get_all_groups()
-            })
-        except Exception:
-            pass
-
-    asyncio.create_task(_async_broadcast_updates())
-
-    return {
-        "status": "ok",
-        "node": node
-    }
-
-@app.get("/api/stream")
-async def stream_live(request: Request, node_id: str = ""):
-    """
-    Stream audio live (PCM 16-bit 44.1kHz mono, mentah) untuk PC client Windows.
-    Koneksi dibiarkan terbuka; data hanya mengalir saat ada siaran yang menarget node ini.
-    """
-    node_id = (node_id or "").strip()
-    if not node_id:
-        raise HTTPException(status_code=400, detail="node_id wajib diisi")
-
-    token, q = stream_hub.subscribe(node_id, asyncio.get_running_loop())
-
-    async def gen():
-        try:
-            while True:
-                try:
-                    chunk = await asyncio.wait_for(q.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    if await request.is_disconnected():
-                        break
-                    continue
-                if chunk == b"STREAM_END":
-                    continue
-                chunks = [chunk]
-                while not q.empty() and len(chunks) < 10:
-                    try:
-                        c = q.get_nowait()
-                        if c != b"STREAM_END":
-                            chunks.append(c)
-                    except asyncio.QueueEmpty:
-                        break
-                if chunks:
-                    yield b"".join(chunks)
-        finally:
-            stream_hub.unsubscribe(token)
-
-    return StreamingResponse(
-        gen(),
-        media_type="audio/mpeg",
-        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Audio-Format": "mp3;rate=44100;ch=1;bitrate=128k"},
-    )
-
-@app.websocket("/ws/node/{node_id}")
-async def ws_node_stream(websocket: WebSocket, node_id: str):
-    """
-    Koneksi WebSocket real-time untuk PC client Windows (IntanWave Node).
-    Mendukung transmisi audio instan (binary frames) dan heartbeat/ping-pong otomatis.
-    """
-    node_id = (node_id or "").strip()
-    if not node_id:
-        await websocket.close(code=1008)
-        return
-
-    await websocket.accept()
-    token, q = stream_hub.subscribe(node_id, asyncio.get_running_loop())
-    
-    # Perbarui status speaker jadi online
-    now_iso = datetime.now().isoformat()
-    with get_db() as conn:
-        conn.execute("UPDATE speakers SET status = 'online', latency_ms = 1, last_online = ? WHERE node_id = ?", (now_iso, node_id))
-        conn.commit()
-
-    async def send_audio():
-        while True:
-            chunk = await q.get()
-            if chunk == b"STREAM_END":
-                await websocket.send_text(json.dumps({"type": "stream_end"}))
-                continue
-            if chunk.startswith(b"JSON:"):
-                try:
-                    await websocket.send_text(chunk[5:].decode("utf-8"))
-                except Exception:
-                    pass
-                continue
-            chunks = [chunk]
-            has_end = False
-            json_to_send = None
-            while not q.empty() and len(chunks) < 10:
-                try:
-                    c = q.get_nowait()
-                    if c == b"STREAM_END":
-                        has_end = True
-                        break
-                    if c.startswith(b"JSON:"):
-                        json_to_send = c[5:].decode("utf-8")
-                        break
-                    chunks.append(c)
-                except asyncio.QueueEmpty:
-                    break
-            if chunks:
-                await websocket.send_bytes(b"".join(chunks))
-            if json_to_send:
-                try:
-                    await websocket.send_text(json_to_send)
-                except Exception:
-                    pass
-            if has_end:
-                await websocket.send_text(json.dumps({"type": "stream_end"}))
-
-    async def recv_heartbeat():
-        while True:
-            msg = await websocket.receive_text()
-            if msg == "ping":
-                await websocket.send_text("pong")
-            elif msg.startswith("{"):
-                try:
-                    data = json.loads(msg)
-                    if data.get("type") == "heartbeat":
-                        ws_ip = validate_speaker_ip(websocket.client.host if websocket.client else "127.0.0.1")
-                        ws_port = validate_speaker_port(data.get("port", 5004))
-                        upsert_node_heartbeat(
-                            node_id=node_id,
-                            device_name=sanitize_label(data.get("device_name")),
-                            ip_address=ws_ip,
-                            port=ws_port,
-                            groups=data.get("groups"),
-                            hostname=sanitize_label(data.get("hostname", ""))
-                        )
-                except Exception:
-                    pass
-
-    try:
-        await asyncio.gather(send_audio(), recv_heartbeat())
-    except (WebSocketDisconnect, asyncio.CancelledError):
-        pass
-    finally:
-        stream_hub.unsubscribe(token)
 
 @app.get("/api/speakers")
 def list_speakers():
@@ -748,22 +546,10 @@ async def ping_single_speaker(speaker_id: int):
     if not sp:
         raise HTTPException(status_code=404, detail="Speaker tidak ditemukan")
 
-    if sp.get("device_type") == "node":
-        last_online_str = sp.get("last_online")
-        is_online = False
-        if last_online_str:
-            try:
-                from datetime import datetime
-                is_online = (datetime.now() - datetime.fromisoformat(last_online_str)).total_seconds() <= 45
-            except Exception:
-                pass
-        status = "online" if is_online else "offline"
-        latency = 1 if is_online else 0
-    else:
-        is_online, latency = await ping_ip(sp["ip_address"])
-        status = "online" if is_online else "offline"
+    is_online, latency = await ping_ip(sp["ip_address"])
+    status = "online" if is_online else "offline"
 
-    update_speaker_status(speaker_id, status, latency, is_node=(sp.get("device_type") == "node"))
+    update_speaker_status(speaker_id, status, latency)
     updated = get_speaker_by_id(speaker_id)
     await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
     return {"online": is_online, "latency_ms": latency, "speaker": updated}
@@ -780,7 +566,7 @@ def test_speaker_audio_endpoint(speaker_id: int):
     if not sp:
         raise HTTPException(status_code=404, detail="Speaker tidak ditemukan")
     try:
-        audio_engine.test_speaker_audio(sp["ip_address"], sp["port"], node_id=sp.get("node_id"))
+        audio_engine.test_speaker_audio(sp["ip_address"], sp["port"])
         return {"message": f"Uji suara dikirim ke {sp['name']} ({sp['ip_address']})"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -892,64 +678,6 @@ def list_schedules():
         """).fetchall()
         return [dict(r) for r in rows]
 
-@app.get("/api/nodes/{node_id}/schedules")
-def list_node_schedules(node_id: str):
-    """
-    Mengambil daftar jadwal siaran yang HANYA relevan / menargetkan node PC ini.
-    Termasuk target 'all', target grup yang cocok, atau target speaker ID yang cocok.
-    Jadwal yang hanya untuk speaker fisik lain (misal Dermaga) otomatis diabaikan.
-    """
-    node_id = (node_id or "").strip()
-    with get_db() as conn:
-        node_spk = conn.execute(
-            "SELECT * FROM speakers WHERE node_id = ? AND enabled = 1", (node_id,)
-        ).fetchone()
-        if not node_spk:
-            return []
-
-        node_id_int = node_spk["id"]
-        node_groups = [g.lower() for g in parse_groups(node_spk["groups"] or node_spk["zone"])]
-
-        all_spks = conn.execute("SELECT id, name, groups, zone FROM speakers").fetchall()
-        spk_group_map = {}
-        for sp in all_spks:
-            sp_grps = [g.lower() for g in parse_groups(sp["groups"] or sp["zone"])]
-            if sp["name"]:
-                sp_grps.append(sp["name"].strip().lower())
-            spk_group_map[sp["id"]] = set(sp_grps)
-
-        rows = conn.execute("""
-            SELECT s.*, a.display_name as audio_title, a.filename as audio_filename, a.duration as audio_duration, a.size as audio_size
-            FROM schedules s
-            LEFT JOIN audio_files a ON s.audio_file_id = a.id
-            WHERE s.enabled = 1
-            ORDER BY s.time_str ASC
-        """).fetchall()
-
-        matched = []
-        for r in rows:
-            tmode = r["target_mode"] or "all"
-            tgroup_raw = r["target_group"] or r["target_zone"] or ""
-            target_groups = [g.lower() for g in parse_groups(tgroup_raw)]
-
-            target_speaker_ids = []
-            if r["target_speaker_id"]:
-                target_speaker_ids.append(r["target_speaker_id"])
-            if r["target_speakers"]:
-                for x in str(r["target_speakers"]).split(","):
-                    if x.strip().isdigit():
-                        target_speaker_ids.append(int(x.strip()))
-
-            is_all = (tmode == "all" and not target_groups and not target_speaker_ids)
-            group_match = any(g in node_groups for g in target_groups)
-            speaker_match = (node_id_int in target_speaker_ids)
-
-            if is_all or group_match or speaker_match:
-                item = dict(r)
-                matched.append(item)
-
-        return matched
-
 def normalize_time_str(time_str: str) -> str:
     """Membersihkan, mendeduplikasi, dan mengurutkan secara kronologis multi-jam (misal '15:00, 08:00' -> '08:00, 15:00')."""
     if not time_str:
@@ -985,7 +713,6 @@ async def create_schedule(s: ScheduleCreate):
     reload_schedules()
     log_event("SCHEDULE_CREATED", f"Membuat jadwal baru: '{s.name}' pada {norm_time}")
     await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
-    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Jadwal berhasil dibuat"}
 
 @app.put("/api/schedules/{schedule_id}")
@@ -1005,7 +732,6 @@ async def update_schedule(schedule_id: int, s: ScheduleCreate):
     reload_schedules()
     log_event("SCHEDULE_UPDATED", f"Memperbarui jadwal: '{s.name}' pada {norm_time}")
     await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
-    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Jadwal berhasil diperbarui"}
 
 @app.patch("/api/schedules/{schedule_id}/toggle")
@@ -1022,7 +748,6 @@ async def toggle_schedule(schedule_id: int):
     reload_schedules()
     log_event("SCHEDULE_TOGGLE", f"Mengubah status jadwal '{row['name']}' menjadi {'AKTIF' if new_val else 'NONAKTIF'}")
     await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
-    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Status jadwal diperbarui", "enabled": bool(new_val)}
 
 @app.delete("/api/schedules/{schedule_id}")
@@ -1034,7 +759,6 @@ async def delete_schedule(schedule_id: int):
     reload_schedules()
     log_event("SCHEDULE_DELETED", f"Menghapus jadwal id {schedule_id}")
     await manager.broadcast({"type": "schedules_update", "schedules": list_schedules()})
-    stream_hub.publish_event({"type": "schedules_update"}, all_nodes=True)
     return {"message": "Jadwal berhasil dihapus"}
 
 _last_manual_triggers = {}
