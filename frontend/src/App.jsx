@@ -837,8 +837,9 @@ export default function App() {
       setSpeakers(resSpeakers || []);
       setGroups(resGroups || []);
 
-      if (resAudio && resAudio.length > 0 && !newSchedule.audio_file_id) {
-        setNewSchedule(prev => ({ ...prev, audio_file_id: resAudio[0].id }));
+      // ponytail: do not overwrite active schedule form audio selection on background poll
+      if (resAudio && resAudio.length > 0) {
+        setNewSchedule(prev => prev.audio_file_id ? prev : ({ ...prev, audio_file_id: resAudio[0].id }));
       }
     } catch (err) {
       console.error('Error fetching data:', err);
