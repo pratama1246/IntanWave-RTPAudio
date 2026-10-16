@@ -54,7 +54,7 @@ class StreamHub:
         for loop, q in subs:
             self._call(loop, self._flush, q)
 
-    def end(self, all_nodes: bool = False, nodes: Optional[Set[str]] = None):
+    def end(self, all_nodes: bool = False, nodes: Optional[Set[str]] = None, flush: bool = False):
         with self._lock:
             if all_nodes or nodes is None:
                 subs = [(loop, q) for _, loop, q in self._subs.values()]
@@ -67,7 +67,7 @@ class StreamHub:
             else:
                 subs = []
         for loop, q in subs:
-            self._call(loop, self._end_sub, q)
+            self._call(loop, self._end_sub, q, flush)
 
     def publish(self, chunk: bytes, all_nodes: bool = False, nodes: Optional[Set[str]] = None):
         with self._lock:
@@ -113,19 +113,26 @@ class StreamHub:
             pass
 
     @staticmethod
-    def _end_sub(q: asyncio.Queue):
-        # Buang hanya chunk audio mentah yang tersisa, TETAP pertahankan event JSON
-        saved_events = []
-        while not q.empty():
-            try:
-                item = q.get_nowait()
-                if item.startswith(b"JSON:"):
-                    saved_events.append(item)
-            except asyncio.QueueEmpty:
-                break
-        for ev in saved_events:
-            q.put_nowait(ev)
-        q.put_nowait(b"STREAM_END")
+    def _end_sub(q: asyncio.Queue, flush: bool = False):
+        if flush:
+            # Buang chunk audio mentah yang tersisa saat di-stop paksa, TETAP pertahankan event JSON
+            saved_events = []
+            while not q.empty():
+                try:
+                    item = q.get_nowait()
+                    if item.startswith(b"JSON:"):
+                        saved_events.append(item)
+                except asyncio.QueueEmpty:
+                    break
+            for ev in saved_events:
+                try:
+                    q.put_nowait(ev)
+                except asyncio.QueueFull:
+                    pass
+        try:
+            q.put_nowait(b"STREAM_END")
+        except asyncio.QueueFull:
+            pass
 
     @staticmethod
     def _flush(q: asyncio.Queue):

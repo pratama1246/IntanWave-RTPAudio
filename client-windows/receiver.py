@@ -491,9 +491,9 @@ class AudioReceiver:
     # =========================================================================
     def sync_schedules_and_media(self, force=False):
         """
-        Sinkronisasi jadwal dan media background untuk node PC ini secara asinkron.
-        HANYA mengambil jadwal yang relevan dengan PC ini dari server, dan mengunduh
-        file audio yang belum ada di folder media lokal.
+        Sinkronisasi jadwal dan seluruh pustaka media dari server secara asinkron.
+        Mengunduh semua file audio yang belum ada di folder media lokal agar baik jadwal
+        maupun siaran manual/jingle dapat diputar instan (0ms download delay).
         """
         if not self.server_url or not self.node_id:
             return
@@ -512,7 +512,7 @@ class AudioReceiver:
                     if resp.status == 200:
                         raw_data = json.loads(resp.read().decode("utf-8"))
                     else:
-                        return
+                        raw_data = []
 
                 updated_schedules = []
                 for item in raw_data:
@@ -535,6 +535,24 @@ class AudioReceiver:
                 self.last_sync_time = time.time()
                 if self.on_schedules_change:
                     self.on_schedules_change(self.schedules)
+
+                # Pre-cache seluruh berkas audio server (termasuk Jingle & Audio Manual) agar klik Play selalu instan
+                try:
+                    audio_url = f"{self.server_url}/api/audio"
+                    audio_req = urllib.request.Request(audio_url, headers={"User-Agent": "IntanWaveNode/1.0"})
+                    with urllib.request.urlopen(audio_req, timeout=5.0) as a_resp:
+                        if a_resp.status == 200:
+                            all_audios = json.loads(a_resp.read().decode("utf-8"))
+                            for a_item in all_audios:
+                                a_fname = Path(a_item.get("filename") or "").name.strip()
+                                if not a_fname or a_fname.startswith("."):
+                                    continue
+                                a_target = self.media_dir / a_fname
+                                if not a_target.exists() or a_target.stat().st_size == 0:
+                                    self._download_media_file(a_fname)
+                except Exception as e:
+                    print(f"[!] Gagal pre-cache pustaka audio: {e}")
+
             except Exception as e:
                 print(f"[!] Gagal sinkronisasi jadwal/media: {e}")
             finally:
@@ -647,20 +665,21 @@ class AudioReceiver:
                 return
 
             self._stop_local_player_locked()
-            self._close_player()
+            self._close_player(immediate=True)
 
             self.active_session_id = session_id
             self.active_source = "LOCAL"
-            self.set_status("STREAMING", category, title)
-            self.notify_toast("IntanWave — Siaran Audio", f"Memutar: {title}")
 
             cmd = [
                 get_ffplay_bin(),
                 "-nodisp",
                 "-autoexit",
                 "-loglevel", "quiet",
+                "-probesize", "32768",
+                "-analyzeduration", "0",
+                "-fflags", "nobuffer",
                 "-volume", "100",
-                "-af", "adelay=300|300",
+                "-af", "adelay=120|120",
                 str(target_file.resolve())
             ]
             try:
@@ -676,6 +695,9 @@ class AudioReceiver:
                 self._on_local_playback_end(session_id)
                 return
 
+        self.set_status("STREAMING", category, title)
+        self.notify_toast("IntanWave — Siaran Audio", f"Memutar: {title}")
+
         try:
             proc.wait()
         except Exception:
@@ -684,7 +706,7 @@ class AudioReceiver:
         self._on_local_playback_end(session_id)
 
     def _on_local_playback_end(self, session_id: str):
-        """Membersihkan state setelah pemutaran audio lokal selesai."""
+        """Membersihkan state setelah pemutaran audio lokal selesai secara utuh."""
         with self.player_lock:
             if self.active_session_id != session_id:
                 return
@@ -692,12 +714,15 @@ class AudioReceiver:
             self.active_session_id = None
             self.active_source = None
             self.set_status("STANDBY", "biasa", "")
-            self._start_player("alaw", 8000)
 
     def _handle_stop_event(self, data: dict):
-        """Menangani perintah stop manual dari server."""
+        """Menangani perintah stop manual / override dari server."""
         session_id = data.get("session_id")
+        reason = (data.get("reason") or "").upper()
         with self.player_lock:
+            # Jangan pernah memotong pemutaran file lokal jika server hanya memberi sinyal FINISHED alami
+            if reason == "FINISHED" and self.active_source == "LOCAL":
+                return
             if session_id and session_id not in ("all", "global") and self.active_session_id and session_id != self.active_session_id:
                 return
             self.stream_stopped = True
@@ -708,14 +733,13 @@ class AudioReceiver:
             self.prebuf = []
             self.prebuf_ready = False
             self.set_status("STANDBY", "biasa", "")
-            self._start_player("alaw", 8000)
 
     def _stop_local_player_locked(self):
         """Menghentikan proses pemutar file lokal jika sedang aktif."""
         if self.local_player_proc:
             try:
                 self.local_player_proc.terminate()
-                self.local_player_proc.wait(timeout=0.4)
+                self.local_player_proc.wait(timeout=0.15)
             except Exception:
                 try:
                     self.local_player_proc.kill()
@@ -740,28 +764,61 @@ class AudioReceiver:
 
     def _on_stream_end(self):
         """
-        Menangani akhir siaran audio secara mulus:
-        1. Kembalikan status ke STANDBY.
-        2. Tutup proses player lama (lokal maupun streaming) dan bersihkan buffer.
-        3. Pastikan audio player pre-warmed dalam mode G.711 A-law 8kHz untuk siaran berikutnya.
+        Menangani akhir siaran streaming (WS/RTP) secara mulus:
+        - Jika sedang memutar file lokal (LOCAL), abaikan sinyal stream_end agar tidak memotong lagu.
+        - Jika sedang live stream (WS/RTP), tutup stdin agar ffplay menghabiskan sisa buffer sampai tuntas.
         """
-        self.stream_stopped = True
         with self.player_lock:
-            self._stop_local_player_locked()
-            self._close_player(immediate=False)
-            self.active_session_id = None
+            if self.active_source == "LOCAL":
+                return
+            self.stream_stopped = True
+            proc = self.player_proc
+            if proc and self.prebuf and not self.prebuf_ready:
+                try:
+                    proc.stdin.write(b"".join(self.prebuf))
+                    proc.stdin.flush()
+                except Exception:
+                    pass
             self.prebuf = []
             self.prebuf_ready = False
-            self.active_source = None
-            self.set_status("STANDBY", "biasa", "")
-            self._start_player("alaw", 8000)
+
+            if proc and proc.poll() is None:
+                try:
+                    if proc.stdin:
+                        proc.stdin.close()
+                except Exception:
+                    pass
+
+                def _drain_and_finish(p):
+                    try:
+                        p.wait(timeout=4.0)
+                    except Exception:
+                        try:
+                            p.kill()
+                        except Exception:
+                            pass
+                    with self.player_lock:
+                        if self.player_proc == p:
+                            self.player_proc = None
+                            self.player_codec = None
+                            self.player_sample_rate = None
+                            self.active_session_id = None
+                            self.active_source = None
+                            self.set_status("STANDBY", "biasa", "")
+
+                threading.Thread(target=_drain_and_finish, args=(proc,), daemon=True).start()
+            else:
+                self._close_player(immediate=True)
+                self.active_session_id = None
+                self.active_source = None
+                self.set_status("STANDBY", "biasa", "")
 
     def _start_player(self, codec="alaw", sample_rate=8000):
         """Menjalankan ffplay dengan konfigurasi ultra-low latency via pipe stdin."""
         if self.player_proc is not None and self.player_proc.poll() is None:
             if self.player_codec == codec and getattr(self, "player_sample_rate", None) == sample_rate:
                 return
-            self._close_player()
+            self._close_player(immediate=True)
 
         if codec == "mp3":
             codec_fmt = "mp3"
@@ -834,12 +891,12 @@ class AudioReceiver:
                 self.player_proc.stdin.write(data)
                 self.player_proc.stdin.flush()
         except Exception:
-            self._close_player()
+            self._close_player(immediate=True)
             self._start_player(self.player_codec or "alaw", getattr(self, "player_sample_rate", 8000) or 8000)
 
-    def _close_player(self, immediate=False):
-        """Menutup proses ffplay dan melepaskan sound card saat aplikasi ditutup atau codec berganti."""
-        if self.player_proc and self.prebuf and not self.prebuf_ready:
+    def _close_player(self, immediate=True):
+        """Menutup proses ffplay dan melepaskan sound card seketika."""
+        if not immediate and self.player_proc and self.prebuf and not self.prebuf_ready:
             try:
                 self.player_proc.stdin.write(b"".join(self.prebuf))
                 self.player_proc.stdin.flush()
@@ -847,18 +904,14 @@ class AudioReceiver:
                 pass
 
         if self.player_proc:
-            if immediate:
-                try:
-                    self.player_proc.terminate()
-                except Exception:
-                    pass
             try:
                 if self.player_proc.stdin:
                     self.player_proc.stdin.close()
             except Exception:
                 pass
             try:
-                self.player_proc.wait(timeout=0.2 if immediate else 0.8)
+                self.player_proc.terminate()
+                self.player_proc.wait(timeout=0.05)
             except Exception:
                 try:
                     self.player_proc.kill()
@@ -1315,10 +1368,6 @@ class AudioReceiver:
             return
         self.is_running = True
 
-        # Pre-warm / Hot-Standby Audio Player
-        # Membuka ffplay ke Windows Audio Engine (WASAPI) sejak awal agar tidak ada delay cold-start
-        self._start_player("alaw", 8000)
-
         self.stream_thread = threading.Thread(target=self._ws_stream_loop, daemon=True)
         self.stream_thread.start()
 
@@ -1331,13 +1380,15 @@ class AudioReceiver:
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
 
+        # Pre-cache seluruh jadwal & berkas audio server sejak detik pertama aplikasi menyala
+        self.sync_schedules_and_media(force=True)
+
     def stop(self):
         self.is_running = False
         with self.player_lock:
             self._stop_local_player_locked()
             self.active_session_id = None
-        self._on_stream_end()
-        self._close_player()
+        self._close_player(immediate=True)
 
         if self.stream_sock:
             try:
@@ -1362,10 +1413,11 @@ class AudioReceiver:
 
     def play_test_chime(self):
         """Memutar nada bel uji coba langsung ke soundcard Windows / amplifier."""
+        chime_sess_id = f"test_{int(time.time() * 1000)}"
         with self.player_lock:
             self._stop_local_player_locked()
-            self._close_player()
-            self.active_session_id = f"test_{int(time.time())}"
+            self._close_player(immediate=True)
+            self.active_session_id = chime_sess_id
             self.active_source = "LOCAL"
             self.set_status("STREAMING", "biasa", "Uji Suara Speaker")
 
@@ -1415,10 +1467,10 @@ class AudioReceiver:
                     pass
 
             with self.player_lock:
-                self.active_session_id = None
-                self.active_source = None
-                self.set_status("STANDBY", "biasa", "")
-                self._start_player("alaw", 8000)
+                if self.active_session_id == chime_sess_id:
+                    self.active_session_id = None
+                    self.active_source = None
+                    self.set_status("STANDBY", "biasa", "")
 
         threading.Thread(target=_play_audio, daemon=True).start()
         return True

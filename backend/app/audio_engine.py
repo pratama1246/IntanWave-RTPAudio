@@ -241,26 +241,26 @@ class AudioEngine:
         http_nodes: Set[str] = set()
         rtp_list: List[str] = []
 
-        if enable_multicast:
-            mc_ep = f"{mc_ip}:{mc_port}"
-            rtp_endpoints = list(dict.fromkeys(target_endpoints)) if target_endpoints else None
-            if rtp_endpoints is None or mc_ep in rtp_endpoints:
-                http_all = True
-                footprint.add("ALL_HTTP")
-                footprint.add("ALL_RTP")
-                rtp_list = [mc_ep]
-            else:
-                kept = []
-                for ep in rtp_endpoints:
-                    ip = ep.split(":")[0]
-                    if ip in node_by_ip:
-                        nid = node_by_ip[ip]
-                        http_nodes.add(nid)
-                        footprint.add(f"node:{nid}")
-                    else:
-                        kept.append(ep)
-                        footprint.add(f"rtp:{ep}")
-                rtp_list = list(dict.fromkeys(kept))
+        mc_ep = f"{mc_ip}:{mc_port}"
+        rtp_endpoints = list(dict.fromkeys(target_endpoints)) if target_endpoints else None
+
+        if rtp_endpoints is not None and mc_ep not in rtp_endpoints:
+            kept = []
+            for ep in rtp_endpoints:
+                ip = ep.split(":")[0]
+                if ip in node_by_ip:
+                    nid = node_by_ip[ip]
+                    http_nodes.add(nid)
+                    footprint.add(f"node:{nid}")
+                else:
+                    kept.append(ep)
+                    footprint.add(f"rtp:{ep}")
+            rtp_list = list(dict.fromkeys(kept))
+        elif enable_multicast or (rtp_endpoints is not None and mc_ep in rtp_endpoints):
+            http_all = True
+            footprint.add("ALL_HTTP")
+            footprint.add("ALL_RTP")
+            rtp_list = [mc_ep]
 
         if enable_local:
             footprint.add("LOCAL")
@@ -417,10 +417,11 @@ class AudioEngine:
             http_nodes=http_nodes
         )
 
-        use_http = enable_multicast and (http_all or bool(http_nodes))
+        has_ws_targets = http_all or bool(http_nodes)
+        use_ws_stream = has_ws_targets and (playback_mode == "stream")
 
         # 1. Bersihkan chunk audio lama dari stream_hub dan kirim sinyal trigger JSON ke PC client nodes
-        if use_http:
+        if has_ws_targets:
             stream_hub.begin(all_nodes=http_all, nodes=http_nodes)
             # ponytail: delay client only when hardware RTP speakers are also targeted (matches ~700ms horn buffer)
             sync_delay = 400 if bool(rtp_list) else 0
@@ -432,7 +433,7 @@ class AudioEngine:
                     "title": title,
                     "category": category,
                     "duration": duration,
-                    "playback_mode": playback_mode,
+                    "playback_mode": playback_mode or "cache",
                     "delay_ms": sync_delay
                 },
                 all_nodes=http_all,
@@ -463,8 +464,8 @@ class AudioEngine:
                     "-f", "tee", "|".join(slaves)
                 ])
 
-        # 2. Pipe audio stream biner MP3 44.1kHz (untuk mode Direct Streaming / Uji Coba)
-        if use_http:
+        # 2. Pipe audio stream biner MP3 44.1kHz HANYA jika mode Direct Streaming ('stream') diminta
+        if use_ws_stream:
             net_cmd_args.extend([
                 "-map", "0:a",
                 "-af", "aresample=44100:async=1",
@@ -488,12 +489,12 @@ class AudioEngine:
             try:
                 session.multicast_proc = subprocess.Popen(
                     net_cmd,
-                    stdout=subprocess.PIPE if use_http else subprocess.DEVNULL,
+                    stdout=subprocess.PIPE if use_ws_stream else subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    bufsize=0 if use_http else -1,
+                    bufsize=0 if use_ws_stream else -1,
                     creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
                 )
-                if use_http:
+                if use_ws_stream:
                     t_pump = threading.Thread(
                         target=self._pump_session_stream,
                         args=(session,),
@@ -502,8 +503,8 @@ class AudioEngine:
                     session.pump_thread = t_pump
                     t_pump.start()
             except Exception as e:
-                if use_http:
-                    stream_hub.end(all_nodes=http_all, nodes=http_nodes)
+                if use_ws_stream:
+                    stream_hub.end(all_nodes=http_all, nodes=http_nodes, flush=True)
                 log_event("RTP_ERROR", f"Gagal menjalankan ffmpeg stream sesi {session_id}: {e}", level="ERROR")
 
         if enable_local:
@@ -552,10 +553,12 @@ class AudioEngine:
         except Exception:
             pass
         finally:
-            stream_hub.end(
-                all_nodes=session.http_all,
-                nodes=session.http_nodes
-            )
+            if not session.stop_event.is_set():
+                stream_hub.end(
+                    all_nodes=session.http_all,
+                    nodes=session.http_nodes,
+                    flush=False
+                )
 
     def _monitor_session(self, session: PlaybackSession):
         """Thread background pemantau progres dan deteksi selesainya sesi pemutaran tertentu."""
@@ -575,20 +578,12 @@ class AudioEngine:
             self.notify_listeners()
 
         with self._lock:
-            self._cleanup_session_procs(session)
+            self._cleanup_session_procs(session, flush=False)
             was_active = self.active_sessions.pop(session.session_id, None) is not None
             if was_active and not session.stop_event.is_set():
                 log_event("PLAYBACK_FINISHED", f"Selesai memutar '{session.title}' (Sesi={session.session_id})")
-                if session.http_all or bool(session.http_nodes):
-                    stream_hub.publish_event(
-                        {
-                            "action": "stop",
-                            "session_id": session.session_id,
-                            "reason": "FINISHED"
-                        },
-                        all_nodes=session.http_all,
-                        nodes=session.http_nodes
-                    )
+                # Catatan: JANGAN mengirim action='stop' saat FINISHED alami agar ffplay lokal di PC client
+                # menyelesaikan pemutaran sampai detik terakhir tanpa terpotong.
 
             self._process_queue_locked()
 
@@ -609,11 +604,11 @@ class AudioEngine:
                 all_nodes=session.http_all,
                 nodes=session.http_nodes
             )
-        self._cleanup_session_procs(session)
+        self._cleanup_session_procs(session, flush=True)
         if reason == "STOPPED":
             log_event("PLAYBACK_STOPPED", f"Siaran dihentikan manual: '{session.title}' (Sesi={session_id})")
 
-    def _cleanup_session_procs(self, session: PlaybackSession):
+    def _cleanup_session_procs(self, session: PlaybackSession, flush: bool = False):
         for proc in [session.multicast_proc, session.local_proc]:
             if proc is not None:
                 try:
@@ -626,7 +621,8 @@ class AudioEngine:
                         pass
         session.multicast_proc = None
         session.local_proc = None
-        stream_hub.end(all_nodes=session.http_all, nodes=session.http_nodes)
+        if flush:
+            stream_hub.end(all_nodes=session.http_all, nodes=session.http_nodes, flush=True)
 
     def _process_queue_locked(self):
         """Mengecek antrean playback dan menjalankan item yang speaker targetnya sudah bebas."""
@@ -689,10 +685,10 @@ class AudioEngine:
             stream_hub.publish_event({"action": "stop", "session_id": "all", "reason": "GLOBAL_STOP"}, all_nodes=True)
             for s in list(self.active_sessions.values()):
                 s.stop_event.set()
-                self._cleanup_session_procs(s)
+                self._cleanup_session_procs(s, flush=False)
             self.active_sessions.clear()
             self.playback_queue.clear()
-            stream_hub.end(all_nodes=True)
+            stream_hub.end(all_nodes=True, flush=True)
 
             self.status = "IDLE"
             self.current_title = ""
