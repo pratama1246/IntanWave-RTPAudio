@@ -1291,7 +1291,7 @@ class AudioReceiver:
     def _monitor_loop(self):
         """Memantau selesainya siaran streaming (WS/RTP) jika tidak ada paket/chunk audio selama > 1.5 detik."""
         while self.is_running:
-            time.sleep(0.1)
+            time.sleep(0.25)
             if self.status == "STREAMING" and self.active_source in ("WS", "RTP", "RTP_SERVER", "RTP_PHONE"):
                 if self.last_audio_time > 0 and (time.time() - self.last_audio_time > 1.5):
                     self._on_stream_end()

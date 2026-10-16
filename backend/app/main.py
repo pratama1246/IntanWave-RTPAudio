@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -61,11 +62,14 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, data: dict):
-        for conn in list(self.active_connections):
+        async def _safe_send(conn: WebSocket):
             try:
                 await asyncio.wait_for(conn.send_json(data), timeout=0.8)
             except Exception:
                 self.disconnect(conn)
+
+        if self.active_connections:
+            await asyncio.gather(*[_safe_send(c) for c in list(self.active_connections)])
 
 manager = ConnectionManager()
 loop = None
@@ -114,6 +118,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 def resolve_audio_file(filename: str, fallback_path: Optional[str] = None) -> Path:
     r"""
@@ -1040,5 +1045,7 @@ if FRONTEND_DIST.exists():
     async def serve_frontend(full_path: str):
         file_path = FRONTEND_DIST / full_path
         if file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(FRONTEND_DIST / "index.html")
+            is_static_asset = "/assets/" in full_path or full_path.endswith((".js", ".css", ".ico", ".png", ".svg", ".woff2"))
+            headers = {"Cache-Control": "public, max-age=86400"} if is_static_asset else {"Cache-Control": "no-cache"}
+            return FileResponse(file_path, headers=headers)
+        return FileResponse(FRONTEND_DIST / "index.html", headers={"Cache-Control": "no-cache"})

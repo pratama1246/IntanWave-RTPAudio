@@ -69,14 +69,9 @@ def get_startup_target() -> str:
         return f'"{Path(sys.executable).resolve()}" --minimized'
 
     base_dir = Path(__file__).resolve().parent
-    exe_candidates = [
-        base_dir / "dist" / "IntanWave-Node" / "IntanWave-Node.exe",
-        base_dir / "IntanWave-Node" / "IntanWave-Node.exe",
-        base_dir / "IntanWave-Node.exe",
-    ]
-    for exe in exe_candidates:
-        if exe.exists():
-            return f'"{exe.resolve()}" --minimized'
+    dist_exe = base_dir / "dist" / "IntanWave-Node" / "IntanWave-Node.exe"
+    if dist_exe.exists():
+        return f'"{dist_exe.resolve()}" --minimized'
 
     bat_path = base_dir / "start_client.bat"
     if bat_path.exists():
@@ -579,6 +574,11 @@ class IntanWaveNodeWindow:
         """Keluar aplikasi sepenuhnya."""
         def _do_quit():
             self.receiver.stop()
+            if getattr(self, "lock_socket", None):
+                try:
+                    self.lock_socket.close()
+                except Exception:
+                    pass
             if self.tray_icon:
                 self.tray_icon.stop()
             self.root.quit()
@@ -596,6 +596,7 @@ class ClientApp:
         self.root = tk.Tk()
         self.receiver = AudioReceiver()
         self.window = IntanWaveNodeWindow(self.root, self.receiver)
+        self.window.lock_socket = self.lock_socket
         self.receiver.on_status_change = self.window.update_status
         self.receiver.on_heartbeat_change = self.window.update_heartbeat_status
         self.receiver.on_schedules_change = self.window.update_schedules_list
