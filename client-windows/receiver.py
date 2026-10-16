@@ -675,11 +675,8 @@ class AudioReceiver:
                 "-nodisp",
                 "-autoexit",
                 "-loglevel", "quiet",
-                "-probesize", "32768",
-                "-analyzeduration", "0",
-                "-fflags", "nobuffer",
                 "-volume", "100",
-                "-af", "adelay=120|120",
+                "-af", "adelay=150|150",
                 str(target_file.resolve())
             ]
             try:
