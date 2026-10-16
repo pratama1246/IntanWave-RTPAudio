@@ -942,10 +942,7 @@ def list_node_schedules(node_id: str):
 
             is_all = (tmode == "all" and not target_groups and not target_speaker_ids)
             group_match = any(g in node_groups for g in target_groups)
-            speaker_match = (node_id_int in target_speaker_ids) or any(
-                bool(spk_group_map.get(sid, set()) & set(node_groups))
-                for sid in target_speaker_ids
-            )
+            speaker_match = (node_id_int in target_speaker_ids)
 
             if is_all or group_match or speaker_match:
                 item = dict(r)
