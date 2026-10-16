@@ -244,8 +244,7 @@ class AudioEngine:
         target_endpoints: Optional[List[str]] = None,
         target_desc: Optional[str] = None,
         category: str = "biasa",
-        is_manual: bool = True,
-        playback_mode: Optional[str] = None
+        is_manual: bool = True
     ) -> dict:
         """
         Memulai playback audio dengan Multi-Zone Parallel Streaming & Priority Queue.

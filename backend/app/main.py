@@ -15,7 +15,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, W
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.config import AUDIO_DIR, BASE_DIR, DEFAULT_MULTICAST_IP, DEFAULT_MULTICAST_PORT
@@ -315,7 +315,6 @@ class PlayRequest(BaseModel):
     target_zone: Optional[str] = None
     speaker_id: Optional[int] = None
     speaker_ids: Optional[List[int]] = None
-    playback_mode: Optional[str] = None
 
 @app.post("/api/play")
 def play_audio(req: PlayRequest):
@@ -410,8 +409,7 @@ def play_audio(req: PlayRequest):
             target_endpoints=target_endpoints,
             target_desc=target_desc,
             category=cat,
-            is_manual=True,
-            playback_mode=req.playback_mode
+            is_manual=True
         )
         return {"message": "Siaran dimulai", "status": audio_engine.get_status()}
     except Exception as e:
@@ -474,7 +472,6 @@ class SpeakerCreate(BaseModel):
     groups: Optional[List[str]] = None
     group: Optional[str] = None
     zone: Optional[str] = None
-    device_type: Optional[str] = "physical"
 
 class SpeakerUpdate(BaseModel):
     name: str
@@ -484,9 +481,6 @@ class SpeakerUpdate(BaseModel):
     group: Optional[str] = None
     zone: Optional[str] = None
     enabled: int = 1
-    device_type: Optional[str] = "physical"
-
-
 
 @app.get("/api/speakers")
 def list_speakers():
@@ -501,7 +495,7 @@ async def add_speaker(s: SpeakerCreate):
         grps = parse_groups(s.groups if s.groups is not None else (s.group or s.zone or "Kantor"))
         if not grps:
             grps = ["Kantor"]
-        new_id = create_speaker(safe_name, safe_ip, safe_port, groups=grps, zone=grps[0], device_type=s.device_type or "physical")
+        new_id = create_speaker(safe_name, safe_ip, safe_port, groups=grps, zone=grps[0])
         log_event("SPEAKER_ADDED", f"Menambah speaker '{safe_name}' ({safe_ip}) ke group: {', '.join(grps)}")
         await manager.broadcast({"type": "speakers_update", "speakers": get_all_speakers()})
         await manager.broadcast({"type": "groups_update", "groups": get_all_groups()})

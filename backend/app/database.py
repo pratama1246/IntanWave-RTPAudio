@@ -305,8 +305,7 @@ def create_speaker(
     ip_address: str, 
     port: int = 5004, 
     groups: Any = None, 
-    zone: str = "Kantor", 
-    device_type: str = "physical"
+    zone: str = "Kantor"
 ) -> int:
     grp_list = parse_groups(groups) if groups is not None else parse_groups(zone)
     if not grp_list:
@@ -320,9 +319,9 @@ def create_speaker(
             cursor.execute("INSERT OR IGNORE INTO groups (name) VALUES (?)", (g,))
             cursor.execute("INSERT OR IGNORE INTO zones (name) VALUES (?)", (g,))
         cursor.execute("""
-            INSERT INTO speakers (name, ip_address, port, zone, groups, status, device_type)
-            VALUES (?, ?, ?, ?, ?, 'unknown', ?)
-        """, (name, ip_address, port, primary_group, grp_json, device_type))
+            INSERT INTO speakers (name, ip_address, port, zone, groups, status)
+            VALUES (?, ?, ?, ?, ?, 'unknown')
+        """, (name, ip_address, port, primary_group, grp_json))
         conn.commit()
         return cursor.lastrowid
 

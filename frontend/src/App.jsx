@@ -665,8 +665,7 @@ export default function App() {
     port: 5004,
     groups: ['Kantor'],
     groupsText: 'Kantor',
-    zone: 'Kantor',
-    device_type: 'physical'
+    zone: 'Kantor'
   });
 
   // Settings State
@@ -1363,8 +1362,7 @@ export default function App() {
       port: 5004,
       groups: [defaultGrp],
       groupsText: defaultGrp,
-      zone: defaultGrp,
-      device_type: 'physical'
+      zone: defaultGrp
     });
     setShowSpeakerModal(true);
   };
@@ -1380,8 +1378,7 @@ export default function App() {
       port: speaker.port || 5004,
       groups: grps,
       groupsText: textVal,
-      zone: grps[0] || 'Kantor',
-      device_type: speaker.device_type || 'physical'
+      zone: grps[0] || 'Kantor'
     });
     setShowSpeakerModal(true);
   };
@@ -1422,8 +1419,7 @@ export default function App() {
         port: speakerForm.port || 5004,
         groups: finalGroups,
         group: finalGroups[0],
-        zone: finalGroups[0],
-        device_type: speakerForm.device_type || 'physical'
+        zone: finalGroups[0]
       };
 
       if (editingSpeaker) {
