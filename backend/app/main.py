@@ -27,7 +27,7 @@ from app.database import (
     get_all_zones, create_zone, update_zone, delete_zone,
     parse_groups
 )
-from app.audio_engine import audio_engine
+from app.audio_engine import audio_engine, resolve_audio_category
 from app.scheduler import scheduler, reload_schedules, trigger_schedule_job
 from app.ping_service import ping_ip, scan_all_speakers_parallel, ping_monitor
 
@@ -143,12 +143,13 @@ def sync_audio_files_to_db():
     with get_db() as conn:
         for f in AUDIO_DIR.glob("*"):
             if f.suffix.lower() in valid_exts and f.is_file():
-                existing = conn.execute("SELECT id FROM audio_files WHERE filename = ?", (f.name,)).fetchone()
+                existing = conn.execute("SELECT id, category FROM audio_files WHERE filename = ?", (f.name,)).fetchone()
                 duration = audio_engine.get_audio_duration(str(f))
+                name = f.stem.replace("_", " ").title()
+                existing_cat = existing["category"] if existing and "category" in existing.keys() else ""
+                cat, _ = resolve_audio_category(existing_cat, f.name, name)
+
                 if not existing:
-                    name = f.stem.replace("_", " ").title()
-                    lname = f.name.lower()
-                    cat = "darurat" if any(k in lname for k in ["siren", "sirine", "ews", "emergency", "bahaya", "evakuasi"]) else "safety" if any(k in lname for k in ["safety", "k3", "briefing", "apd"]) else "biasa"
                     conn.execute("""
                         INSERT INTO audio_files (filename, display_name, file_path, format, duration, size, category)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -157,9 +158,10 @@ def sync_audio_files_to_db():
                     # Selalu sinkronkan file_path dan size agar sesuai dengan direktori aktif di OS/Container saat ini
                     conn.execute("""
                         UPDATE audio_files 
-                        SET file_path = ?, size = ?, duration = CASE WHEN duration <= 0 THEN ? ELSE duration END
+                        SET file_path = ?, size = ?, duration = CASE WHEN duration <= 0 THEN ? ELSE duration END,
+                            category = CASE WHEN category IS NULL OR category = '' OR category = 'biasa' THEN ? ELSE category END
                         WHERE id = ?
-                    """, (str(f.resolve()), f.stat().st_size, duration, existing["id"]))
+                    """, (str(f.resolve()), f.stat().st_size, duration, cat, existing["id"]))
         conn.commit()
 
 # --- WEBSOCKET ---

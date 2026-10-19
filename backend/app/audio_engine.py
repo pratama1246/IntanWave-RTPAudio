@@ -47,24 +47,36 @@ class QueuedPlayback:
     footprint: Set[str]
 
 
-def get_audio_priority(category: str, filename: str = "", title: str = "") -> int:
+def resolve_audio_category(category: str = "", filename: str = "", title: str = "") -> Tuple[str, int]:
+    """
+    Menentukan kategori ('darurat', 'safety', 'biasa') dan level prioritas (1, 2, 3)
+    berdasarkan kategori terdaftar atau pencocokan kata kunci pada nama file/judul.
+    """
     cat = (category or "").lower().strip()
-    if cat == "darurat":
-        return 1
-    if cat in ("safety", "k3"):
-        return 2
-    if cat == "biasa":
-        return 3
-
-    # Fallback keyword matching
     fn = (filename or "").lower()
     tt = (title or "").lower()
     combined = f"{cat} {fn} {tt}"
-    if any(k in combined for k in ["darurat", "siren", "sirine", "ews", "emergency", "bahaya", "evakuasi", "kebakaran", "gempa", "tsunami"]):
-        return 1
-    if any(k in combined for k in ["safety", "k3", "briefing", "peringatan", "instruksi", "pengumuman"]):
-        return 2
-    return 3
+
+    # 1. Cek Darurat / Emergency (P1)
+    if cat == "darurat" or any(k in combined for k in [
+        "darurat", "siren", "sirine", "ews", "emergency", "bahaya", "evakuasi", "kebakaran", "gempa", "tsunami"
+    ]):
+        return "darurat", 1
+
+    # 2. Cek Safety / K3 (P2)
+    if cat in ("safety", "k3") or any(k in combined for k in [
+        "safety", "k3", "keselamatan", "apd", "pelindung", "briefing", "peringatan", "instruksi", "pengumuman"
+    ]):
+        return "safety", 2
+
+    # 3. Default Biasa / Rutin (P3)
+    return "biasa", 3
+
+
+def get_audio_priority(category: str, filename: str = "", title: str = "") -> int:
+    _, prio = resolve_audio_category(category, filename, title)
+    return prio
+
 
 
 def footprints_overlap(fp1: Set[str], fp2: Set[str]) -> bool:
@@ -145,6 +157,7 @@ class AudioEngine:
                 title = primary_session.title
                 filename = primary_session.file_name
                 category = primary_session.category
+                priority_val = primary_session.priority
                 duration = round(primary_session.duration, 1)
                 elapsed_val = round(elapsed, 1)
                 enable_mc = primary_session.enable_multicast
@@ -155,6 +168,7 @@ class AudioEngine:
                 title = ""
                 filename = ""
                 category = "biasa"
+                priority_val = 3
                 duration = 0.0
                 elapsed_val = 0.0
                 enable_mc = True
@@ -198,6 +212,7 @@ class AudioEngine:
                 "title": title,
                 "file": filename,
                 "category": category,
+                "priority": priority_val,
                 "duration": duration,
                 "elapsed": elapsed_val,
                 "enable_multicast": enable_mc,
@@ -220,15 +235,16 @@ class AudioEngine:
     ) -> Tuple[Set[str], List[str]]:
         footprint: Set[str] = set()
         mc_ep = f"{mc_ip}:{mc_port}"
-        rtp_endpoints = list(dict.fromkeys(target_endpoints)) if target_endpoints else None
+        rtp_list = list(dict.fromkeys(target_endpoints)) if target_endpoints else []
 
-        if rtp_endpoints is not None and mc_ep not in rtp_endpoints:
-            for ep in rtp_endpoints:
-                footprint.add(f"rtp:{ep}")
-            rtp_list = rtp_endpoints
-        else:
-            footprint.add("ALL_RTP")
+        if not rtp_list:
             rtp_list = [mc_ep]
+            footprint.add("ALL_RTP")
+        else:
+            if mc_ep in rtp_list or enable_multicast:
+                footprint.add("ALL_RTP")
+            for ep in rtp_list:
+                footprint.add(f"rtp:{ep}")
 
         if enable_local:
             footprint.add("LOCAL")
@@ -268,7 +284,7 @@ class AudioEngine:
         mc_enabled = enable_multicast if enable_multicast is not None else (settings.get("enable_multicast", "true") == "true")
         loc_enabled = enable_local if enable_local is not None else (settings.get("enable_local", "false") == "true")
         desc = target_desc or "Semua Speaker"
-        cat = category or "biasa"
+        resolved_cat, prio = resolve_audio_category(category, path_obj.name, title)
 
         footprint, rtp_list = self._calculate_footprint(
             enable_multicast=mc_enabled,
@@ -278,7 +294,6 @@ class AudioEngine:
             mc_port=mc_port
         )
 
-        prio = get_audio_priority(cat, path_obj.name, title)
         now = time.time()
 
         with self._lock:
@@ -310,7 +325,7 @@ class AudioEngine:
                             enable_local=loc_enabled,
                             target_endpoints=target_endpoints,
                             target_desc=desc,
-                            category=cat,
+                            category=resolved_cat,
                             priority=prio,
                             is_manual=False,
                             created_at=time.time(),
@@ -327,7 +342,7 @@ class AudioEngine:
                 file_path=str(path_obj.resolve()),
                 file_name=path_obj.name,
                 title=title,
-                category=cat,
+                category=resolved_cat,
                 priority=prio,
                 enable_multicast=mc_enabled,
                 enable_local=loc_enabled,

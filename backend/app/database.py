@@ -245,6 +245,23 @@ def init_db():
                OR LOWER(filename) LIKE '%evakuasi%'
         """)
 
+        # Ensure safety / K3 files are tagged as 'safety'
+        cursor.execute("""
+            UPDATE audio_files 
+            SET category = 'safety' 
+            WHERE category != 'darurat' AND (
+                LOWER(filename) LIKE '%safety%'
+                OR LOWER(filename) LIKE '%k3%'
+                OR LOWER(filename) LIKE '%keselamatan%'
+                OR LOWER(filename) LIKE '%apd%'
+                OR LOWER(filename) LIKE '%pelindung%'
+                OR LOWER(filename) LIKE '%briefing%'
+                OR LOWER(display_name) LIKE '%safety%'
+                OR LOWER(display_name) LIKE '%k3%'
+                OR LOWER(display_name) LIKE '%keselamatan%'
+            )
+        """)
+
         # Pastikan tidak ada path Windows absolut yang tertinggal dari migrasi database
         cursor.execute("""
             UPDATE audio_files 

@@ -1910,14 +1910,18 @@ export default function App() {
 
   const hasEmergency = isPlaying && (
     activeSessions.some(s => s.priority === 1 || (s.category || '').toLowerCase() === 'darurat' || (s.title || '').toLowerCase().includes('sirine') || (s.title || '').toLowerCase().includes('darurat') || (s.title || '').toLowerCase().includes('ews')) ||
+    playback.priority === 1 ||
+    (playback.category || '').toLowerCase() === 'darurat' ||
     (playback.title || '').toLowerCase().includes('sirine') || 
     (playback.title || '').toLowerCase().includes('darurat') ||
     (playback.title || '').toLowerCase().includes('ews')
   );
 
   const hasSafety = isPlaying && !hasEmergency && (
-    activeSessions.some(s => s.priority === 2 || (s.category || '').toLowerCase() === 'safety' || (s.title || '').toLowerCase().includes('safety') || (s.title || '').toLowerCase().includes('k3')) ||
-    (playback.category || '').toLowerCase() === 'safety'
+    activeSessions.some(s => s.priority === 2 || ['safety', 'k3'].includes((s.category || '').toLowerCase()) || ['safety', 'k3', 'keselamatan', 'apd', 'pelindung'].some(k => (s.title || '').toLowerCase().includes(k))) ||
+    ['safety', 'k3'].includes((playback.category || '').toLowerCase()) ||
+    playback.priority === 2 ||
+    ['safety', 'k3', 'keselamatan', 'apd', 'pelindung'].some(k => (playback.title || '').toLowerCase().includes(k))
   );
 
   const barBgClass = hasEmergency
