@@ -1942,9 +1942,11 @@ export default function App() {
           {/* Logo & Online Quick Pill */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2.5">
-              <div className="w-8.5 h-8.5 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
-                <Radio className="w-4.5 h-4.5" />
-              </div>
+              <img 
+                src="/logo.png" 
+                alt="IntanWave Logo" 
+                className="w-8.5 h-8.5 rounded-xl object-contain shadow-xs bg-white" 
+              />
               <div className="flex items-center gap-2">
                 <span className="text-base font-semibold text-slate-900 leading-none">IntanWave</span>
                 <span className="text-xs text-slate-500 font-normal hidden sm:inline">Audio Server</span>
@@ -2784,6 +2786,21 @@ export default function App() {
 
       </main>
 
+      {/* FOOTER */}
+      <footer className="mt-auto border-t border-slate-200/80 bg-white py-4 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="IntanWave" className="w-4.5 h-4.5 object-contain rounded" />
+            <span className="font-semibold text-slate-700">IntanWave</span>
+            <span>•</span>
+            <span>IP Speaker Automation System</span>
+          </div>
+          <div className="text-slate-400">
+            © 2026 Pratama Putra. Hak cipta dilindungi undang-undang.
+          </div>
+        </div>
+      </footer>
+
       {/* ========================================================= */}
       {/* MODAL: MONITORING & MANAJEMEN SPEAKER                     */}
       {/* ========================================================= */}
@@ -2793,9 +2810,7 @@ export default function App() {
             {/* Header Modal */}
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <Volume2 className="w-5 h-5" />
-                </div>
+                <img src="/logo.png" alt="IntanWave Logo" className="w-9 h-9 rounded-xl object-contain shadow-2xs bg-slate-50 p-1 border border-slate-100" />
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-base font-semibold text-slate-900">Monitoring & Status Speaker</h3>
@@ -3236,12 +3251,16 @@ export default function App() {
               <div className={`p-2.5 rounded-xl border shrink-0 ${
                 playConfirmAudio.category === 'darurat'
                   ? 'bg-rose-50 border-rose-200'
-                  : 'bg-blue-50 border-blue-200'
+                  : playConfirmAudio.category === 'safety'
+                    ? 'bg-amber-50 border-amber-200'
+                    : 'bg-blue-50 border-blue-200'
               }`}>
                 {playConfirmAudio.category === 'darurat' ? (
                   <Siren className="w-6 h-6 text-rose-600 animate-pulse" />
+                ) : playConfirmAudio.category === 'safety' ? (
+                  <HardHat className="w-6 h-6 text-amber-600" />
                 ) : (
-                  <Radio className="w-6 h-6 text-blue-600" />
+                  <img src="/logo.png" alt="IntanWave Logo" className="w-6 h-6 object-contain" />
                 )}
               </div>
               <div className="flex-1 min-w-0">
