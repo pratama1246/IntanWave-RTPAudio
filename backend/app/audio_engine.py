@@ -426,6 +426,7 @@ class AudioEngine:
                     stderr=subprocess.DEVNULL,
                     creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
                 )
+                log_event("PLAYBACK_START", f"Memulai siaran '{title}' (P{priority}/{category}) ke {target_desc} [{len(rtp_list)} endpoint RTP]")
             except Exception as e:
                 log_event("RTP_ERROR", f"Gagal menjalankan ffmpeg stream sesi {session_id}: {e}", level="ERROR")
 
