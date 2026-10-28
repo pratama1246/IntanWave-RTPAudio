@@ -46,3 +46,6 @@ backend/storage/audio/*.mp3
 Thumbs.db
 client-windows/media/
 dist/IntanWave-Node/media/
+
+# Security audit reports
+security-audit-out/
