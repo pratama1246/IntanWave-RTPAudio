@@ -394,8 +394,8 @@ class AudioEngine:
             if len(rtp_list) == 1:
                 net_cmd_args.extend([
                     "-map", "0:a",
-                    "-af", "aresample=8000:async=1,asetnsamples=n=160",
-                    "-c:a", "pcm_alaw",
+                    "-af", "adelay=500:all=1,aresample=16000:async=1,asetnsamples=n=320",
+                    "-c:a", "g722",
                     "-ac", "1",
                     "-f", "rtp", f"rtp://{rtp_list[0]}?pkt_size=172"
                 ])
@@ -407,8 +407,8 @@ class AudioEngine:
                 ]
                 net_cmd_args.extend([
                     "-map", "0:a",
-                    "-af", "aresample=8000:async=1,asetnsamples=n=160",
-                    "-c:a", "pcm_alaw",
+                    "-af", "adelay=500:all=1,aresample=16000:async=1,asetnsamples=n=320",
+                    "-c:a", "g722",
                     "-ac", "1",
                     "-f", "tee", "|".join(slaves)
                 ])
@@ -614,8 +614,8 @@ class AudioEngine:
         cmd = [
             "ffmpeg", "-re", "-y",
             "-i", str(chime_path.resolve()),
-            "-af", "aresample=8000:async=1,asetnsamples=n=160",
-            "-acodec", "pcm_alaw",
+            "-af", "adelay=500:all=1,aresample=16000:async=1,asetnsamples=n=320",
+            "-acodec", "g722",
             "-ac", "1",
             "-f", "rtp",
             rtp_url
