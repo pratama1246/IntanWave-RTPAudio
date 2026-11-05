@@ -1,84 +1,132 @@
-# Design Specification: IntanWave Audio Server
+# Design specification — IntanWave
 
-**Branding:** IntanWave  
-**Prinsip Desain:** Bersih, fungsional, dan mengutamakan keterbacaan data penjadwalan.  
-**Karakter Visual:** Antarmuka konsol audio profesional tanpa elemen dekoratif berlebihan, tanpa emoji, dan tanpa huruf kapital paksa.
+Diperbarui: 5 November 2026.
 
----
+Dokumen ini menjelaskan desain yang sudah diterapkan di `frontend/src/App.jsx` dan `frontend/src/index.css`. Dokumen ini menggantikan spesifikasi tata letak sebelumnya.
 
-> Pembaruan 5 November 2026: arah visual terbaru mengikuti konsol audio monokrom yang dipilih pengguna. Ketentuan di bagian ini menggantikan detail visual lama di bawah.
->
-> - Palet: putih aluminium, abu netral, dan charcoal. Warna status dan darurat tetap memiliki arti operasional.
-> - Tata letak: jam ringkas di heading; panel status siaran utama berdampingan dengan ringkasan speaker. Jadwal dan pustaka berada di bawah.
-> - Kedalaman: layar cekung, tombol timbul dengan respons tekan, dan bentuk gelombang audio dekoratif berbasis CSS. Bentuk ini bukan pengukur level audio.
-> - Animasi gelombang hanya saat siaran aktif dan dinonaktifkan untuk preferensi reduced motion.
-> - Tipografi: DM Sans untuk antarmuka, IBM Plex Mono untuk jam serta data teknis, dengan font cadangan sistem.
-> - Layar kecil menumpuk panel secara vertikal; tabel memiliki gulir horizontal lokal.
-> - Kontrol siaran, pemilihan target, konfirmasi, jadwal, dan pengelolaan perangkat menggunakan alur aplikasi yang sudah ada.
+## Arah visual
 
-## 1. Arsitektur Tata Letak
+IntanWave adalah konsol siaran speaker IP untuk operator fasilitas dan pelabuhan. Antarmuka mengambil inspirasi dari perangkat audio fisik: bodi aluminium terang, layar charcoal yang cekung, serta tombol yang sedikit timbul.
 
-IntanWave menggunakan tata letak dua kolom seimbang agar seluruh fungsi penting dapat dipantau tanpa harus berpindah tab atau menggulir layar secara berlebihan:
+Karakter utama:
+
+- Hitam-putih dan abu netral sebagai dasar.
+- Logo tetap memakai warna biru aslinya.
+- Kedalaman dibuat dengan CSS, tanpa library atau model 3D.
+- Warna tambahan menunjukkan kondisi operasional: koneksi, K3, dan darurat.
+- Status, nama audio, tujuan, dan kontrol lebih diutamakan daripada elemen dekoratif.
+
+Inspirasi bentuk perangkat: [Teenage Engineering TX–6](https://teenage.engineering/products/tx-6). Identitas produk tetap IntanWave.
+
+## Tata letak
 
 ```text
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  INTANWAVE          RTP Multicast 239.255.0.1:5004    15:35:12 WIB    Pengaturan │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│  STATUS SIARAN AKTIF                                                             │
-│  Lagu Indonesia Raya • 01:24 / 02:30   [====================--------------]       │
-│  Keluaran: Jaringan Multicast dan Soundcard Lokal                 [ Hentikan ]   │
-├─────────────────────────────────────────┬────────────────────────────────────────┤
-│  JADWAL SIARAN                          │  SIARAN CEPAT                          │
-│                                         │                                        │
-│  Siaran berikutnya: 16:25 Jingle Apel   │  [ Lagu Kebangsaan ]  [ Apel Masuk   ] │
-│                                         │  [ Pengingat K3    ]  [ Himbauan Truk] │
-│  [ Tambah Jadwal ]                      │  [ Istirahat Siang ]  [ Sirine Darurat]│
-│                                         │  [ Unggah Berkas   ]  [ Kelola Berkas] │
-│  08:08   Apel Pagi                AKTIF │                                        │
-│          Setiap hari                    ├────────────────────────────────────────┤
-│          Berkas: anthem_utama.mp3       │  STATUS PERANGKAT                      │
-│                                         │                                        │
-│  10:00   Lagu Kebangsaan          AKTIF │  Speaker CS20 Dermaga    Tersambung    │
-│          Senin sampai Jumat             │  Speaker CS20 Gerbang    Tersambung    │
-│          Berkas: lagu_kebangsaan.mp3    │  Terminal Audio Windows  Tersambung    │
-│                                         │                                        │
-│  16:56   Penutupan Jam Kerja   NONAKTIF ├────────────────────────────────────────┤
-│          Setiap hari                    │  INFORMASI SISTEM                      │
-│          Berkas: closing.mp3            │  Pustaka: 12 berkas audio              │
-│                                         │  Jadwal aktif: 4 siaran                │
-└─────────────────────────────────────────┴────────────────────────────────────────┘
+Logo IntanWave                           Koneksi · Riwayat · Pengaturan
+
+Ruang siaran.                                      Tanggal · Jam server
+
++-------------------------------------------+--------------------------+
+| Pusat kendali audio                       | Jaringan speaker         |
+| +---------------------------------------+ |                          |
+| | Status · Judul audio · Tujuan          | | Jumlah perangkat online  |
+| | Sesi aktif / antrean · Gelombang 3D    | | Ringkasan perangkat      |
+| +---------------------------------------+ |                          |
+| Siaran berikutnya         [Pilih audio]  | |                          |
+| [Sirine] [K3] [Tujuan] / kontrol berhenti| | [Kelola perangkat]       |
++-------------------------------------------+--------------------------+
+
+Jadwal & audio
+[Jadwal siaran] [Pustaka audio]                    [Tambah / Unggah]
+Jadwal berikutnya atau filter kategori
+Tabel jadwal atau berkas audio
+
+Footer
 ```
 
----
+Header bersifat sticky. Bilah status siaran terpisah sudah dihapus; kontrolnya berada di panel utama. Jumlah speaker tidak diulang sebagai badge di header.
 
-## 2. Aturan Tipografi dan Gaya
+Pada desktop, panel utama menggunakan kolom fleksibel dan panel perangkat selebar 300 px. Pada lebar maksimal 900 px, kolom perangkat menjadi 260 px. Pada maksimal 720 px, kedua panel ditumpuk vertikal. Tabel tetap dapat digulir horizontal dalam wadahnya.
 
-* **Ketebalan Huruf:** Menggunakan `font-normal`, `font-medium`, dan `font-semibold`. Tidak menggunakan `font-extrabold` atau `font-black`.
-* **Transformasi Teks:** Tidak menggunakan `uppercase`. Seluruh judul dan label ditulis menggunakan sentence case atau title case alami.
-* **Spasi Karakter:** Menggunakan `tracking-normal`. Menghindari `tracking-wide` atau `tracking-wider`.
-* **Ikon:** Menggunakan ikon vektor garis (Lucide React) monokrom. Tidak menggunakan karakter emoji.
-* **Tanda Kurung:** Meminimalkan penggunaan teks di dalam tanda kurung agar salinan teks lebih ringkas dan terfokus.
+## Palet dan permukaan
 
----
+| Elemen | Warna / perlakuan |
+| --- | --- |
+| Latar halaman | Abu netral `#e8e8e8` |
+| Bodi panel | Gradien aluminium terang, garis tepi, highlight bagian atas |
+| Layar siaran | Charcoal gelap, bingkai cekung, teks terang |
+| Teks utama | Hitam atau abu gelap |
+| Logo | Aset asli berwarna; tanpa filter grayscale |
+| Status tersambung | Hijau dengan label teks |
+| Aksi darurat | Merah dengan ikon dan label |
+| Scrollbar | Thumb `#989898`, track `#e9e9e9`, hover `#777777` |
 
-## 3. Komponen Utama
+Gradien dan bayangan dipakai untuk menjelaskan bentuk permukaan serta respons tekan. Hindari menambahkan glow, glass, atau warna dekoratif ke setiap komponen.
 
-### Bilah Siaran Aktif
-Bilah horizontal kompak di bagian atas yang menampilkan status pemutaran audio secara realtime melalui WebSocket:
-* Judul audio yang sedang mengudara.
-* Counter durasi dan penunjuk kemajuan.
-* Tombol darurat untuk menghentikan siaran seketika.
+## Panel siaran dan perubahan status
 
-### Manajemen Jadwal Siaran
-* **Banner Siaran Terdekat:** Menghitung jadwal berikutnya secara dinamis berdasarkan jam saat ini dan memberikan estimasi waktu tersisa.
-* **Baris Jadwal:**
-  * Waktu siar dalam angka jam digital berukuran besar dan mudah dibaca sekilas.
-  * Keterangan siklus pemutaran harian atau hari kerja.
-  * Sakelar aktif/nonaktif satu kali klik.
-  * Tombol aksi untuk duplikasi jadwal, uji putar suara, dan hapus jadwal.
+Warna yang berubah adalah **bodi luar panel**, sedangkan layar bagian dalam tetap gelap.
 
-### Siaran Cepat
-Papan tombol siaran instan untuk audio penting seperti bel masuk, himbauan keselamatan, atau sirine darurat yang dapat dipicu secara manual sewaktu-waktu.
+| Kondisi | Warna bodi atas → bawah | Label status |
+| --- | --- | --- |
+| Siaga | `#fdfdfd` → `#e6e6e6` | Sistem siaga |
+| Siaran rutin | `#454545` → `#292929` | Sedang mengudara |
+| K3 / keselamatan | `#fae6b4` → `#e9bd69` | Siaran keselamatan |
+| Darurat | `#bc3048` → `#8d1830` | Siaran darurat |
 
-### Status Perangkat
-Daftar indikator endpoint penerima di jaringan lokal (RTP Multicast) dan soundcard komputer lokal yang terhubung ke amplifier.
+Untuk beberapa sesi, kondisi mengikuti prioritas tertinggi: darurat, keselamatan, lalu rutin. Status juga ditulis sebagai teks agar tidak hanya mengandalkan warna.
+
+- Tinggi panel tetap 440 px pada desktop dan 500 px pada lebar maksimal 720 px, baik saat siaga maupun siaran.
+- Tinggi layar tetap 216 px. Judul maksimal dua baris; konten sesi panjang digulir di dalam layar.
+- Transisi warna bodi, teks pendamping, border, dan bayangan berlangsung 0,5 detik dengan easing `ease`.
+- Warna gradien dianimasikan melalui custom property bertipe warna, `--frame-top` dan `--frame-bottom`.
+- Bentuk gelombang CSS bersifat dekoratif, bukan indikator level atau pengukur sinyal audio.
+- Gelombang bergerak saat siaran aktif. Preferensi `prefers-reduced-motion` menonaktifkan animasi dan transisi.
+- Sesi paralel menampilkan judul, tujuan, durasi, dan kontrol berhenti per sesi. Antrean menampilkan jumlah siaran yang menunggu.
+
+## Tipografi dan ikon
+
+- **DM Sans**: antarmuka, judul, label, dan tombol.
+- **IBM Plex Mono**: jam, waktu siaran, angka teknis, dan counter.
+- Font memiliki fallback sistem jika Google Fonts tidak tersedia.
+- Gunakan sentence case dan istilah yang konsisten. Singkatan seperti RTP, K3, dan OPUS mengikuti penulisan resminya.
+- Gunakan Lucide React untuk ikon; warna ikon boleh menunjukkan kategori dan status.
+- Hindari teks promosi pada layar operator. Jelaskan tindakan dan akibatnya secara langsung.
+
+## Tombol, filter, dan dropdown
+
+Tombol aksi serta tombol ikon menggunakan highlight atas, bayangan pendek, dan efek turun saat ditekan. Tombol khusus seperti `hardware-key` dan filter kategori memiliki detail permukaan sendiri. Toggle serta baris daftar perangkat mempertahankan bentuk sesuai fungsinya.
+
+- Tombol kategori berupa key abu-abu yang timbul. Kategori aktif terlihat cekung dan memiliki `aria-pressed`.
+- Warna ikon K3 dan darurat membantu membedakan kategori tanpa mewarnai seluruh filter.
+- Gunakan `CustomDropdown` untuk pilihan tunggal, termasuk codec. Pemilihan beberapa speaker memakai `MultiTargetSelector`.
+- Scrollbar menu `CustomDropdown` disembunyikan, tetapi pengguliran tetap berfungsi.
+- Tombol yang sedang menyimpan tetap menahan klik berulang. Tidak memakai cursor loading global.
+- Pertahankan indikator fokus keyboard dan label aksesibel pada kontrol penting.
+
+## Jadwal dan pustaka audio
+
+Tab utama memisahkan jadwal dan pustaka. Tombol utama menyesuaikan tab: tambah jadwal atau unggah berkas.
+
+Toggle jadwal memperbarui tampilan segera, menyimpan ke server, dan menahan klik berulang selama permintaan berlangsung. Pembaruan latar belakang tidak menimpa nilai yang masih disimpan. Jika penyimpanan gagal, status dikembalikan dan pengguna menerima pesan kesalahan.
+
+Pustaka menyediakan filter Semua, Rutin, K3 & Safety, dan Darurat. Angka kategori berasal dari data aplikasi. Ikon pensil membuka perubahan nama dan prioritas audio.
+
+## Modal dan konfirmasi
+
+- Halaman belakang tidak dapat digulir selama ada modal terbuka, termasuk modal bertingkat.
+- Isi modal tetap dapat digulir; tinggi maksimal 90dvh.
+- Setelah seluruh modal ditutup, pengaturan scroll halaman dipulihkan.
+- Scrollbar halaman dan modal berwarna abu-abu.
+- Konfirmasi hapus jadwal, audio, speaker, dan grup menggunakan modal custom yang menyebut nama item, akibat penghapusan, serta pilihan Batal dan Hapus. Fokus awal berada pada Batal.
+- Konfirmasi sirine menampilkan tujuan dan berkas suara. Tombol konfirmasi memulai countdown 5 detik; suara belum dikirim selama countdown.
+- Countdown dapat dibatalkan dengan tombol batal atau menutup modal. Timer dibersihkan saat komponen dilepas. Pengiriman dimulai setelah hitung mundur selesai.
+
+## Pengaturan codec
+
+Pengaturan Sistem menyediakan satu codec aktif untuk siaran RTP dan tes speaker berikutnya: G.722, G.711A / PCMA, G.711U / PCMU, atau OPUS. Default mempertahankan G.722. Siaran yang sudah berjalan tidak diubah oleh pilihan baru.
+
+Petunjuk harus menjelaskan bahwa codec penerima perlu disamakan. Untuk OPUS, tampilkan keterangan RTP payload type 111. Detail encoding dan pemetaan payload tercantum dalam README.
+
+## Batas perubahan berikutnya
+
+Pertahankan logo berwarna, panel siaran terpadu, ukuran panel yang stabil, serta kedalaman tombol. Jangan mengembalikan bilah status terpisah atau menambahkan kembali informasi yang sama di beberapa tempat tanpa kebutuhan operasional. Sesuaikan dokumentasi ini ketika tata letak atau perilaku komponen berubah.
