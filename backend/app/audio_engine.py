@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Callable, List, Dict, Set, Tuple
 from app.config import DEFAULT_MULTICAST_IP, DEFAULT_MULTICAST_PORT, AUDIO_DIR
 from app.database import log_event, get_settings
+from app.audio_codecs import DEFAULT_CODEC, rtp_output_args
 
 
 @dataclass
@@ -391,27 +392,8 @@ class AudioEngine:
 
         net_cmd_args = []
         if rtp_list:
-            if len(rtp_list) == 1:
-                net_cmd_args.extend([
-                    "-map", "0:a",
-                    "-af", "aresample=16000:async=1,asetnsamples=n=320",
-                    "-c:a", "g722",
-                    "-ac", "1",
-                    "-f", "rtp", f"rtp://{rtp_list[0]}?pkt_size=172"
-                ])
-            else:
-                shared_ssrc = random.randint(1, 2**31 - 1)
-                slaves = [
-                    f"[select=a:f=rtp:ssrc={shared_ssrc}:seq=0]rtp://{ep}?pkt_size=172"
-                    for ep in rtp_list
-                ]
-                net_cmd_args.extend([
-                    "-map", "0:a",
-                    "-af", "aresample=16000:async=1,asetnsamples=n=320",
-                    "-c:a", "g722",
-                    "-ac", "1",
-                    "-f", "tee", "|".join(slaves)
-                ])
+            codec = get_settings().get("audio_codec", DEFAULT_CODEC)
+            net_cmd_args = rtp_output_args(codec, rtp_list, random.randint(1, 2**31 - 1))
 
         if net_cmd_args:
             net_cmd = [
@@ -610,15 +592,10 @@ class AudioEngine:
             if not chime_path.exists():
                 raise FileNotFoundError("Berkas test_chime.wav tidak ditemukan")
 
-        rtp_url = f"rtp://{ip}:{port}?pkt_size=172"
+        codec = get_settings().get("audio_codec", DEFAULT_CODEC)
         cmd = [
-            "ffmpeg", "-re", "-y",
-            "-i", str(chime_path.resolve()),
-            "-af", "aresample=16000:async=1,asetnsamples=n=320",
-            "-acodec", "g722",
-            "-ac", "1",
-            "-f", "rtp",
-            rtp_url
+            "ffmpeg", "-re", "-y", "-i", str(chime_path.resolve()),
+            *rtp_output_args(codec, [f"{ip}:{port}"], random.randint(1, 2**31 - 1))
         ]
         try:
             subprocess.Popen(

@@ -179,6 +179,7 @@ def init_db():
             "enable_multicast": "true",
             "enable_local": "false",
             "local_volume": "100",
+            "audio_codec": "g722",
             "siren_audio_filename": "sirine_ews_test.wav",
             "k3_audio_filename": "safety_k3_chime.wav"
         }

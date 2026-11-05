@@ -1,9 +1,10 @@
+import { startCountdown } from './countdown';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ChevronDown, Play, Square, Volume2, Radio, Clock, Music, 
   Upload, Trash2, Settings, Plus, RefreshCw, Bell, 
   Siren, HardHat, Copy, History, X, Search, 
-  Wifi, Activity, Check, Calendar,
+  Wifi, Activity, Check,
   Headphones, Pause,
   Layers, Edit2, AlertTriangle, ArrowRight, Users
 } from 'lucide-react';
@@ -20,6 +21,7 @@ const DAYS_CONFIG = [
 
 // REUSABLE UNIFIED CUSTOM DROPDOWN COMPONENT (CLEAN, MODERN, CONSISTENT)
 function CustomDropdown({
+  id,
   value,
   onChange,
   options,
@@ -65,6 +67,8 @@ function CustomDropdown({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
+        id={id}
+        aria-expanded={isOpen}
         title={currentLabel}
         className={`flex items-center justify-between gap-2 rounded-xl transition-all font-medium text-xs cursor-pointer outline-hidden select-none min-w-0 overflow-hidden ${
           size === 'sm' ? 'px-2.5 py-1.5' : 'px-3 py-2'
@@ -85,7 +89,7 @@ function CustomDropdown({
 
       {isOpen && (
         <div
-          className={`absolute left-0 top-full mt-1.5 min-w-full max-h-60 overflow-y-auto rounded-xl p-1 z-50 shadow-xl border animate-in fade-in zoom-in-95 duration-100 ${
+          className={`dropdown-scroll absolute left-0 top-full mt-1.5 min-w-full max-h-60 overflow-y-auto rounded-xl p-1 z-50 shadow-xl border animate-in fade-in zoom-in-95 duration-100 ${
             isDark
               ? 'bg-slate-800 border-slate-700 text-slate-200 divide-y divide-slate-700/50'
               : 'bg-white border-slate-200 text-slate-700 divide-y divide-slate-100'
@@ -252,7 +256,7 @@ function MultiTargetSelector({
     const nextGroups = exists
       ? selectedGroups.filter(g => g !== groupName)
       : [...selectedGroups, groupName];
-    
+
     let nextMode = 'all';
     if (nextGroups.length > 0 && selectedSpeakerIds.length > 0) nextMode = 'hybrid';
     else if (nextGroups.length > 0) nextMode = 'group';
@@ -383,7 +387,7 @@ function MultiTargetSelector({
                 Semua Speaker Global
               </button>
             </div>
-            
+
             <p className="text-[11px] text-slate-400">
               Pilih group atau speaker spesifik untuk siaran gabungan, contoh: 1 Group dan 1 Speaker.
             </p>
@@ -596,6 +600,13 @@ export default function App() {
 
   const [audioList, setAudioList] = useState([]);
   const [schedules, setSchedules] = useState([]);
+  const pendingScheduleToggles = useRef(new Map());
+  const [togglingScheduleIds, setTogglingScheduleIds] = useState([]);
+  const mergePendingScheduleToggles = (items) => items.map(item =>
+    pendingScheduleToggles.current.has(item.id)
+      ? { ...item, enabled: pendingScheduleToggles.current.get(item.id) }
+      : item
+  );
   const [speakers, setSpeakers] = useState([]);
   const [logs, setLogs] = useState([]);
   const [currentTime, setCurrentTime] = useState('');
@@ -637,6 +648,15 @@ export default function App() {
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
   const [showSirenConfirmModal, setShowSirenConfirmModal] = useState(false);
+  const [sirenCountdown, setSirenCountdown] = useState(null);
+  const cancelSirenTimer = useRef(null);
+  const closeSirenModal = () => {
+    cancelSirenTimer.current?.();
+    cancelSirenTimer.current = null;
+    setSirenCountdown(null);
+    setShowSirenConfirmModal(false);
+  };
+  useEffect(() => () => cancelSirenTimer.current?.(), []);
   const [playConfirmAudio, setPlayConfirmAudio] = useState(null);
   const [editingSpeaker, setEditingSpeaker] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -657,6 +677,34 @@ export default function App() {
   const [newGroupName, setNewGroupName] = useState('');
   const [editingGroupOldName, setEditingGroupOldName] = useState(null);
   const [editingGroupNewName, setEditingGroupNewName] = useState('');
+
+  const [deleteConfirmation, setDeleteConfirmation] = useState(null);
+  const deleteConfirmationResolver = useRef(null);
+  const requestDelete = (name, description) => new Promise(resolve => {
+    deleteConfirmationResolver.current?.(false);
+    deleteConfirmationResolver.current = resolve;
+    setDeleteConfirmation({ name, description });
+  });
+  const resolveDelete = (confirmed) => {
+    deleteConfirmationResolver.current?.(confirmed);
+    deleteConfirmationResolver.current = null;
+    setDeleteConfirmation(null);
+  };
+  useEffect(() => () => deleteConfirmationResolver.current?.(false), []);
+
+  const isModalOpen = Boolean(deleteConfirmation || showSpeakerMonitorModal || showAddSchedule || showSettings || showLogsModal || showSpeakerModal || showSirenConfirmModal || playConfirmAudio || categoryChangeTarget || showUploadModal || showGroupModal);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousRootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousRootOverflow;
+    };
+  }, [isModalOpen]);
 
   // Speaker Form State
   const [speakerForm, setSpeakerForm] = useState({
@@ -820,7 +868,7 @@ export default function App() {
         fetch('/api/groups').then(r => r.json()).catch(() => fetch('/api/zones').then(r => r.json()).catch(() => []))
       ]);
       setAudioList(resAudio || []);
-      setSchedules(resSched || []);
+      setSchedules(mergePendingScheduleToggles(resSched || []));
       setSettings(resSet || {});
       setLogs(resLogs || []);
       setSpeakers(resSpeakers || []);
@@ -889,7 +937,7 @@ export default function App() {
           } else if (data.type === 'audio_update' && Array.isArray(data.audio_list)) {
             setAudioList(data.audio_list);
           } else if (data.type === 'schedules_update' && Array.isArray(data.schedules)) {
-            setSchedules(data.schedules);
+            setSchedules(mergePendingScheduleToggles(data.schedules));
           } else if (data.status) {
             setPlayback(data);
           }
@@ -1446,7 +1494,7 @@ export default function App() {
 
   // Delete Speaker
   const handleDeleteSpeaker = async (id, name) => {
-    if (!confirm(`Hapus speaker '${name}'?`)) return;
+    if (!await requestDelete(name, 'Speaker akan dihapus dari daftar perangkat.')) return;
     try {
       await fetch(`/api/speakers/${id}`, { method: 'DELETE' });
       fetchData();
@@ -1457,11 +1505,24 @@ export default function App() {
 
   // Toggle Schedule
   const handleToggleSchedule = async (id) => {
+    const schedule = schedules.find(item => item.id === id);
+    if (!schedule || pendingScheduleToggles.current.has(id)) return;
+    const previousEnabled = schedule.enabled;
+    const nextEnabled = !previousEnabled;
+    pendingScheduleToggles.current.set(id, nextEnabled);
+    setTogglingScheduleIds(ids => [...ids, id]);
+    setSchedules(items => items.map(item => item.id === id ? { ...item, enabled: nextEnabled } : item));
     try {
-      await fetch(`/api/schedules/${id}/toggle`, { method: 'PATCH' });
-      fetchData();
+      const response = await fetch(`/api/schedules/${id}/toggle`, { method: 'PATCH' });
+      if (!response.ok) throw new Error('Status jadwal gagal disimpan');
+      const result = await response.json();
+      setSchedules(items => items.map(item => item.id === id ? { ...item, enabled: result.enabled } : item));
     } catch (err) {
-      alert('Gagal mengubah jadwal: ' + err);
+      setSchedules(items => items.map(item => item.id === id ? { ...item, enabled: previousEnabled } : item));
+      alert('Gagal mengubah jadwal: ' + err.message);
+    } finally {
+      pendingScheduleToggles.current.delete(id);
+      setTogglingScheduleIds(ids => ids.filter(pendingId => pendingId !== id));
     }
   };
 
@@ -1532,7 +1593,7 @@ export default function App() {
 
   // Delete Schedule
   const handleDeleteSchedule = async (id) => {
-    if (!confirm('Hapus jadwal ini?')) return;
+    if (!await requestDelete(schedules.find(item => item.id === id)?.name || 'Jadwal', 'Jadwal ini akan dihapus dan tidak dijalankan lagi.')) return;
     try {
       await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
       fetchData();
@@ -1690,7 +1751,7 @@ export default function App() {
 
   // Delete Audio
   const handleDeleteAudio = async (id) => {
-    if (!confirm('Hapus berkas audio ini?')) return;
+    if (!await requestDelete(audioList.find(item => item.id === id)?.display_name || 'Berkas audio', 'Berkas audio akan dihapus dari penyimpanan server.')) return;
     try {
       await fetch(`/api/audio/${id}`, { method: 'DELETE' });
       fetchData();
@@ -1703,11 +1764,15 @@ export default function App() {
   const handleSaveSettings = async (e) => {
     e.preventDefault();
     try {
-      await fetch('/api/settings', {
+      const response = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
       });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || 'Pengaturan gagal disimpan');
+      }
       setShowSettings(false);
       fetchData();
     } catch (err) {
@@ -1772,7 +1837,7 @@ export default function App() {
   };
 
   const handleDeleteGroup = async (groupName) => {
-    if (!confirm(`Hapus group "${groupName}"? Speaker di group ini akan dilepas dari group tersebut.`)) return;
+    if (!await requestDelete(groupName, 'Grup akan dihapus. Speaker tetap tersimpan dan dilepas dari grup ini.')) return;
     try {
       const res = await fetch(`/api/groups/${encodeURIComponent(groupName)}`, {
         method: 'DELETE'
@@ -1924,16 +1989,10 @@ export default function App() {
     ['safety', 'k3', 'keselamatan', 'apd', 'pelindung'].some(k => (playback.title || '').toLowerCase().includes(k))
   );
 
-  const barBgClass = hasEmergency
-    ? 'bg-rose-700 text-white border-rose-800'
-    : hasSafety
-      ? 'bg-amber-600 text-white border-amber-700'
-      : isPlaying
-        ? 'bg-blue-600 text-white border-blue-700'
-        : 'bg-white text-slate-800 border-slate-200/90 shadow-2xs';
+  const broadcastFrameState = hasEmergency ? 'emergency' : hasSafety ? 'safety' : isPlaying ? 'routine' : 'idle';
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans">
+    <div className="intanwave-console min-h-screen flex flex-col font-sans">
       {/* STICKY TOP CONTAINER: HEADER + COLORBAR */}
       <div className="sticky top-0 z-30 shadow-xs">
         {/* 1. TOP HEADER (COMPACT & CLEAN) */}
@@ -1952,16 +2011,6 @@ export default function App() {
                 <span className="text-xs text-slate-500 font-normal hidden sm:inline">Audio Server</span>
               </div>
             </div>
-
-            {/* Interactive Speaker Badge (Opens Full Monitoring Modal) */}
-            <button
-              onClick={() => setShowSpeakerMonitorModal(true)}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
-              title="Buka panel pemantauan speaker lengkap"
-            >
-              <span className={`w-2 h-2 rounded-full ${onlineCount > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-              <span>{onlineCount}/{speakers.length} Speaker Online</span>
-            </button>
 
             {/* Active Browser Preview Indicator if running */}
             {isPreviewPlaying && (
@@ -2013,120 +2062,51 @@ export default function App() {
         </div>
       </header>
 
-      {/* 2. ACTIVE BROADCAST BAR (STATUS + SOUNDBOARD MINI / MULTI-ZONE SESSIONS) */}
-      <section className={`border-b transition-colors ${barBgClass}`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 min-h-15 py-2.5 flex flex-wrap items-center justify-between gap-3">
-          {/* Status Pill & Live Info */}
-          <div className="flex items-center gap-2.5 min-w-0 flex-1 flex-wrap">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ${
-              hasEmergency
-                ? 'bg-rose-800 text-white border border-rose-500'
-                : hasSafety
-                  ? 'bg-amber-700 text-white border border-amber-500'
-                  : isPlaying
-                    ? 'bg-blue-700 text-white border border-blue-500'
-                    : 'bg-slate-100 text-slate-700 border border-slate-200/90'
-            }`}>
-              <span className={`w-2 h-2 rounded-full ${
-                hasEmergency 
-                  ? 'bg-white animate-ping' 
-                  : isPlaying 
-                    ? 'bg-emerald-400 animate-pulse' 
-                    : 'bg-emerald-500'
-              }`} />
-              {hasEmergency 
-                ? (hasMultipleSessions ? `Darurat • ${activeSessions.length} Zona` : 'Darurat')
-                : hasSafety
-                  ? (hasMultipleSessions ? `K3 • ${activeSessions.length} Zona` : 'K3')
-                  : isPlaying 
-                    ? (hasMultipleSessions ? `Berbunyi • ${activeSessions.length} Zona` : 'Berbunyi')
-                    : 'Siaga'}
-            </span>
 
-            {isPlaying ? (
-              hasMultipleSessions ? (
-                /* Multiple Simultaneous Sessions: Render Session Chips */
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  {activeSessions.map((s) => {
-                    const isPrio1 = s.priority === 1 || (s.category || '').toLowerCase() === 'darurat';
-                    const isPrio2 = s.priority === 2 || (s.category || '').toLowerCase() === 'safety';
-                    return (
-                      <div 
-                        key={s.session_id} 
-                        className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-xl text-xs font-medium border shadow-2xs backdrop-blur-xs ${
-                          isPrio1
-                            ? 'bg-rose-900/60 border-rose-400 text-rose-100'
-                            : isPrio2
-                              ? 'bg-amber-900/50 border-amber-300 text-amber-100'
-                              : 'bg-black/20 border-white/20 text-white'
-                        }`}
-                      >
-                        <span className="font-semibold text-white/95 truncate max-w-[120px] sm:max-w-[160px]">
-                          {s.target_desc}:
-                        </span>
-                        <span className="truncate max-w-[120px] sm:max-w-[180px]">
-                          {s.title}
-                        </span>
-                        <span className="text-[11px] opacity-80 shrink-0 font-mono">
-                          {formatSec(s.elapsed)}/{formatSec(s.duration)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => handleStopSession(s.session_id, e)}
-                          title={`Hentikan sesi ${s.target_desc}`}
-                          className="hover:bg-white/20 rounded p-0.5 text-white/80 hover:text-white transition-colors cursor-pointer"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                /* Single Active Session */
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-white/40 hidden md:inline">•</span>
-                  <div className="min-w-0">
-                    <h2 className="text-sm font-semibold truncate max-w-xs sm:max-w-md text-white">
-                      {playback.title}
-                    </h2>
-                    {playback.target_desc && (
-                      <span className="text-[11px] text-white/70 block truncate">
-                        Target: {playback.target_desc}
-                      </span>
-                    )}
+      </div>
+
+      {/* 3. MAIN WORKSPACE (ALARM-FIRST CONSOLE) */}
+      <main className="console-workspace max-w-7xl mx-auto px-4 sm:px-6 py-5 flex-1 w-full space-y-4">
+
+        <div className="console-heading">
+          <div><span className="console-eyebrow">IntanWave / Konsol operator</span><h1>Ruang siaran.</h1><p>Kelola jadwal dan siarkan audio ke speaker.</p></div>
+          <div className="console-clock"><span>{serverDateDisplay}</span><strong>{serverHours}:{serverMinutes}<small>:{serverSeconds}</small></strong><span>Waktu server · WIB</span></div>
+        </div>
+        <div className="console-deck">
+          <section className={'broadcast-module broadcast-frame-' + broadcastFrameState} aria-label="Ringkasan siaran">
+            <div className="module-top"><span><Radio size={14} /> Pusat kendali audio</span><span className="module-serial">IntanWave · RTP</span></div>
+            <div className={isPlaying ? 'receiver-display is-broadcasting' : 'receiver-display'}>
+              <div className="display-copy">
+                <span className="display-state"><i className={isPlaying ? 'led live' : 'led'} />{hasEmergency ? 'Siaran darurat' : hasSafety ? 'Siaran keselamatan' : isPlaying ? 'Sedang mengudara' : 'Sistem siaga'}</span>
+                <h2>{isPlaying ? (hasMultipleSessions ? activeSessions.length + ' zona mengudara' : playback.title) : 'Belum ada siaran aktif.'}</h2>
+                <p>{isPlaying ? (playback.target_desc || 'Siaran sedang berlangsung') : 'Pilih speaker tujuan, lalu pilih audio.'}</p>
+            {hasMultipleSessions && (
+              <div className="session-list">
+                {activeSessions.map(session => (
+                  <div className="session-line" key={session.session_id}>
+                    <span><strong>{session.target_desc}</strong> · {session.title}</span>
+                    <span>{formatSec(session.elapsed)} / {formatSec(session.duration)}</span>
+                    <button onClick={event => handleStopSession(session.session_id, event)} aria-label={'Hentikan sesi ' + session.target_desc}><Square size={13} /></button>
                   </div>
-                </div>
-              )
-            ) : (
-              /* Idle */
-              <>
-                <span className="text-slate-300 hidden md:inline">•</span>
-                <h2 className="text-sm font-semibold truncate max-w-xs sm:max-w-sm text-slate-800">
-                  Server Siap Menyiarkan
-                </h2>
-              </>
+                ))}
+              </div>
             )}
-
-            {/* Queue Badge if any waiting items */}
-            {activeQueue.length > 0 && (
-              <span 
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-400/20 text-amber-100 border border-amber-300/40 shrink-0"
-                title={`${activeQueue.length} jadwal sedang menunggu giliran speaker: ${activeQueue.map(q => q.title).join(', ')}`}
-              >
-                <Clock className="w-3 h-3 text-amber-300" />
-                <span>+{activeQueue.length} Antrean</span>
-              </span>
-            )}
-          </div>
-
+            {activeQueue.length > 0 && <p className="queue-summary" title={activeQueue.map(item => item.title).join(', ')}>{activeQueue.length} siaran menunggu giliran</p>}
+              </div>
+              <div className="sound-sculpture" aria-hidden="true">{[28, 52, 80, 108, 80, 52, 28].map((height, i) => <span key={i} style={{ '--bar-height': height + 'px', '--bar-delay': i * 0.12 + 's' }} />)}</div>
+            </div>
+            <div className="deck-bottom">
+              <div className="next-cue"><span>Siaran berikutnya</span><strong>{nextSchedule ? nextSchedule.time_str + ' · ' + nextSchedule.name : 'Belum ada jadwal aktif'}</strong></div>
+              <button className="hardware-key primary-key" onClick={() => setActiveMainTab('audio')}><Music size={15} />Pilih audio<ArrowRight size={14} /></button>
+            </div>
+            <div className="deck-controls">
           {/* Soundboard Mini & Controls */}
           <div className="flex items-center gap-2 shrink-0">
             {isPlaying ? (
               <>
                 {!hasMultipleSessions && (
                   <div className="flex items-center gap-2 mr-1">
-                    <span className="text-xs font-medium text-white/90 hidden sm:inline">
+                    <span className="text-xs font-medium text-current hidden sm:inline">
                       {formatSec(playback.elapsed)} / {formatSec(playback.duration)}
                     </span>
                     <div className="w-16 sm:w-28 bg-black/30 rounded-full h-1.5 overflow-hidden">
@@ -2191,75 +2171,16 @@ export default function App() {
               </>
             )}
           </div>
-        </div>
-      </section>
-      </div>
-
-      {/* 3. MAIN WORKSPACE (ALARM-FIRST CONSOLE) */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 flex-1 w-full space-y-4">
-        
-        {/* WAKTU SERVER CARD (PROPORSIONAL, ELEGAN, TIDAK KURUS) */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-2xs">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
-            {/* Sisi Kiri: Waktu & Tanggal Server */}
-            <div>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 mb-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                <span>Waktu server</span>
-              </div>
-              
-              <div className="flex items-baseline gap-2">
-                <div className="flex items-center text-3xl sm:text-4xl md:text-5xl font-semibold text-slate-900 select-none tracking-tight">
-                  <span className="inline-block w-[1.1ch] text-center">{serverHours[0]}</span>
-                  <span className="inline-block w-[1.1ch] text-center">{serverHours[1]}</span>
-                  <span className="inline-block w-[0.8ch] text-center text-slate-400">:</span>
-                  <span className="inline-block w-[1.1ch] text-center">{serverMinutes[0]}</span>
-                  <span className="inline-block w-[1.1ch] text-center">{serverMinutes[1]}</span>
-                  <span className="inline-block w-[0.8ch] text-center text-slate-400">:</span>
-                  <span className="inline-block w-[1.1ch] text-center text-slate-500">{serverSeconds[0]}</span>
-                  <span className="inline-block w-[1.1ch] text-center text-slate-500">{serverSeconds[1]}</span>
-                </div>
-                <span className="text-sm font-semibold text-slate-400">
-                  WIB
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 mt-2 text-xs text-slate-500">
-                <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                <span>{serverDateDisplay}</span>
-                <span className="text-slate-300">•</span>
-                <span>Waktu Indonesia Barat • UTC+7</span>
-              </div>
             </div>
-
-            {/* Sisi Kanan: Ringkasan Status Sistem (Mengisi Ruang agar Kokoh dan Tidak Kurus) */}
-            <div className="grid grid-cols-2 gap-3 sm:gap-4 shrink-0">
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/80 border border-slate-200/60">
-                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                  <Volume2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-[11px] text-slate-400 font-medium">Speaker Aktif</div>
-                  <div className="text-sm font-semibold text-slate-800">
-                    {onlineCount} <span className="text-xs font-normal text-slate-400">/ {speakers.length} Online</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/80 border border-slate-200/60">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                  <Clock className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-[11px] text-slate-400 font-medium">Jadwal Siaran</div>
-                  <div className="text-sm font-semibold text-slate-800">
-                    {schedules.filter(s => s.enabled).length} <span className="text-xs font-normal text-slate-400">Aktif</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          </section>
+          <aside className="speaker-module" aria-label="Status speaker">
+            <div className="module-top"><span><Volume2 size={14} /> Jaringan speaker</span></div>
+            <div className="speaker-summary"><strong>{String(onlineCount).padStart(2, '0')}<span> / {String(speakers.length).padStart(2, '0')}</span></strong><span>Perangkat online</span></div>
+            <div className="speaker-preview">{speakers.length ? speakers.slice(0, 3).map(speaker => <button key={speaker.id} onClick={() => setShowSpeakerMonitorModal(true)} className="speaker-line"><span className={speaker.status === 'online' ? 'led online' : 'led offline'} /><span><strong>{speaker.name}</strong><small>{speaker.ip_address || speaker.ip || 'Speaker jaringan'}</small></span><span className="device-status">{speaker.status === 'online' ? 'Online' : 'Offline'}</span></button>) : <p>Belum ada speaker. Tambahkan perangkat untuk mulai menyiarkan.</p>}</div>
+            <button className="hardware-key manage-key" onClick={() => setShowSpeakerMonitorModal(true)}>Kelola perangkat <ArrowRight size={14} /></button>
+          </aside>
         </div>
+        <div className="workspace-title"><h2>Jadwal & audio</h2></div>
 
         {/* TAB NAVIGATION & PRIMARY ACTIONS */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2291,7 +2212,7 @@ export default function App() {
               }`}
             >
               <Music className="w-3.5 h-3.5" />
-              <span>Pustaka Berkas Audio</span>
+              <span>Pustaka audio</span>
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
                 activeMainTab === 'audio' ? 'bg-blue-50 text-blue-700' : 'bg-slate-300/60 text-slate-700'
               }`}>
@@ -2385,6 +2306,11 @@ export default function App() {
                             <td className="py-3 px-4 text-center whitespace-nowrap">
                               <button
                                 onClick={() => handleToggleSchedule(s.id)}
+                                role="switch"
+                                aria-label={'Aktifkan jadwal ' + s.name}
+                                aria-checked={Boolean(s.enabled)}
+                                aria-busy={togglingScheduleIds.includes(s.id)}
+                                disabled={togglingScheduleIds.includes(s.id)}
                                 className={`w-9 h-5 inline-flex items-center rounded-full p-0.5 cursor-pointer transition-colors ${
                                   s.enabled ? 'bg-emerald-500' : 'bg-slate-200'
                                 }`}
@@ -2564,62 +2490,21 @@ export default function App() {
         {/* TAB 2: PUSTAKA BERKAS AUDIO */}
         {activeMainTab === 'audio' && (
           <div className="space-y-3">
-            {/* Filter Pills Bar */}
-            <div className="p-2.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs flex flex-wrap items-center justify-between gap-2.5 text-xs">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-slate-400 font-medium mr-1 text-[11px]">Kategori:</span>
-                <button
-                  type="button"
-                  onClick={() => setAudioCategoryFilter('all')}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                    audioCategoryFilter === 'all'
-                      ? 'bg-blue-600 text-white shadow-2xs'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                  }`}
-                >
-                  Semua • {audioList.length}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAudioCategoryFilter('biasa')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                    audioCategoryFilter === 'biasa'
-                      ? 'bg-blue-600 text-white shadow-2xs'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                  }`}
-                >
-                  <Volume2 className="w-3 h-3" />
-                  <span>Rutin • {audioList.filter(a => (a.category || 'biasa') === 'biasa').length}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAudioCategoryFilter('safety')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                    audioCategoryFilter === 'safety'
-                      ? 'bg-amber-600 text-white shadow-2xs'
-                      : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80'
-                  }`}
-                >
-                  <HardHat className="w-3 h-3 text-amber-600" />
-                  <span>K3 & Safety • {audioList.filter(a => a.category === 'safety').length}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAudioCategoryFilter('darurat')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                    audioCategoryFilter === 'darurat'
-                      ? 'bg-rose-600 text-white shadow-2xs'
-                      : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80'
-                  }`}
-                >
-                  <Siren className="w-3 h-3 text-rose-500 animate-pulse" />
-                  <span>Darurat • {emergencyAudios.length}</span>
-                </button>
+            <div className="category-console">
+              <div className="category-keys" role="group" aria-label="Filter kategori audio">
+                <span className="category-label">Kategori</span>
+                {[
+                  { value: 'all', label: 'Semua', count: audioList.length },
+                  { value: 'biasa', label: 'Rutin', count: audioList.filter(a => (a.category || 'biasa') === 'biasa').length, icon: <Volume2 size={13} /> },
+                  { value: 'safety', label: 'K3 & Safety', count: audioList.filter(a => a.category === 'safety').length, icon: <HardHat size={13} className="text-amber-700" /> },
+                  { value: 'darurat', label: 'Darurat', count: emergencyAudios.length, icon: <Siren size={13} className="text-rose-600" /> }
+                ].map(category => (
+                  <button key={category.value} type="button" className="category-key" aria-pressed={audioCategoryFilter === category.value} onClick={() => setAudioCategoryFilter(category.value)}>
+                    {category.icon}<span>{category.label}</span><span className="category-count">{category.count}</span>
+                  </button>
+                ))}
               </div>
-
-              <div className="text-[11px] text-slate-400">
-                Pilih ikon pensil di kolom aksi untuk mengubah prioritas atau nama audio.
-              </div>
+              <p>Ubah nama dan prioritas lewat ikon pensil.</p>
             </div>
 
             {/* Table Container */}
@@ -2805,7 +2690,7 @@ export default function App() {
       {/* MODAL: MONITORING & MANAJEMEN SPEAKER                     */}
       {/* ========================================================= */}
       {showSpeakerMonitorModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-4xl max-h-[88vh] flex flex-col p-5 shadow-xl">
             {/* Header Modal */}
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
@@ -3056,7 +2941,7 @@ export default function App() {
       {/* MODAL: TAMBAH / EDIT SPEAKER                               */}
       {/* ========================================================= */}
       {showSpeakerModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
             <div className="flex items-center justify-between mb-3.5">
               <div>
@@ -3172,7 +3057,7 @@ export default function App() {
       {/* MODAL: KONFIRMASI SIARAN SIRINE DARURAT                    */}
       {/* ========================================================= */}
       {showSirenConfirmModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
             <div className="flex items-start gap-3.5">
               <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 shrink-0">
@@ -3183,17 +3068,18 @@ export default function App() {
                   Konfirmasi Siaran Sirine Darurat
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Sirine peringatan darurat akan langsung dibunyikan ke speaker fisik luar. Pastikan kondisi darurat atau telah dikoordinasikan.
+                  Sirine akan disiarkan 5 detik setelah konfirmasi. Pastikan tujuan siaran sudah benar. Hitung mundur bisa dibatalkan.
                 </p>
               </div>
               <button 
-                onClick={() => setShowSirenConfirmModal(false)} 
+                onClick={closeSirenModal}
                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
+            {sirenCountdown !== null && <div className="siren-countdown" role="status" aria-live="polite"><strong>{sirenCountdown}</strong><span>Sirine akan disiarkan dalam {sirenCountdown} detik</span></div>}
             <div className="mt-4 p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 font-medium">Target Siaran:</span>
@@ -3203,7 +3089,7 @@ export default function App() {
                 <span className="text-slate-500 font-medium shrink-0">Berkas Suara:</span>
                 <CustomDropdown
                   value={selectedEmergencyAudio || settings.siren_audio_filename || emergencyAudios[0]?.filename || 'sirine_ews_test.wav'}
-                  onChange={val => setSelectedEmergencyAudio(val)}
+                  onChange={val => { if (sirenCountdown === null) setSelectedEmergencyAudio(val); }}
                   options={emergencyAudios.map(ea => ({
                     value: ea.filename,
                     label: `${ea.display_name} • ${ea.filename}`,
@@ -3219,22 +3105,28 @@ export default function App() {
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setShowSirenConfirmModal(false)}
+                onClick={closeSirenModal}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
               >
                 Batal
               </button>
               <button
                 type="button"
+                disabled={sirenCountdown !== null}
                 onClick={() => {
-                  setShowSirenConfirmModal(false);
+                  if (cancelSirenTimer.current) return;
                   const chosenAudio = selectedEmergencyAudio || settings.siren_audio_filename || emergencyAudios[0]?.filename || 'sirine_ews_test.wav';
-                  handlePlayFilenameToSpeakers(chosenAudio);
+                  cancelSirenTimer.current = startCountdown(5, setSirenCountdown, () => {
+                    cancelSirenTimer.current = null;
+                    setSirenCountdown(null);
+                    setShowSirenConfirmModal(false);
+                    handlePlayFilenameToSpeakers(chosenAudio);
+                  });
                 }}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-all cursor-pointer"
               >
                 <Siren className="w-3.5 h-3.5" />
-                <span>Ya, Bunyikan Sirine</span>
+                <span>{sirenCountdown !== null ? 'Menunggu hitung mundur' : 'Mulai hitung mundur'}</span>
               </button>
             </div>
           </div>
@@ -3245,7 +3137,7 @@ export default function App() {
       {/* MODAL: KONFIRMASI SIARAN AUDIO DARI TABEL                */}
       {/* ========================================================= */}
       {playConfirmAudio && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl animate-in fade-in zoom-in-95 duration-100">
             <div className="flex items-start gap-3.5">
               <div className={`p-2.5 rounded-xl border shrink-0 ${
@@ -3342,7 +3234,7 @@ export default function App() {
       {/* MODAL: TAMBAH / SALIN JADWAL                               */}
       {/* ========================================================= */}
       {showAddSchedule && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
             <div className="flex items-center justify-between mb-3.5">
               <h3 className="text-base font-semibold text-slate-900">{editingScheduleId ? 'Edit Jadwal Siaran' : 'Tambah Jadwal Siaran'}</h3>
@@ -3601,7 +3493,7 @@ export default function App() {
       {/* MODAL: RIWAYAT AKTIVITAS (AUDIT LOGS)                      */}
       {/* ========================================================= */}
       {showLogsModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col p-5 shadow-xl">
             <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
               <div>
@@ -3630,7 +3522,7 @@ export default function App() {
       {/* MODAL: KONFIRMASI UBAH KONDISI / KATEGORI SUARA           */}
       {/* ========================================================= */}
       {categoryChangeTarget && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
             {/* Header */}
             <div className="flex items-start gap-3.5">
@@ -3773,7 +3665,7 @@ export default function App() {
       {/* MODAL: UNGGAH BERKAS AUDIO                                */}
       {/* ========================================================= */}
       {showUploadModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg flex flex-col p-5 shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -3966,7 +3858,7 @@ export default function App() {
       {/* MODAL: KELOLA GROUP SPEAKER                               */}
       {/* ========================================================= */}
       {showGroupModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg max-h-[85vh] flex flex-col p-5 shadow-xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
@@ -4113,8 +4005,8 @@ export default function App() {
       {/* MODAL: PENGATURAN SISTEM & TOMBOL CEPAT                   */}
       {/* ========================================================= */}
       {showSettings && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md max-h-[90vh] overflow-y-auto p-5 shadow-xl">
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
@@ -4122,7 +4014,7 @@ export default function App() {
                 </div>
                 <div>
                   <h3 className="text-base font-semibold text-slate-900">Pengaturan Sistem</h3>
-                  <p className="text-[11px] text-slate-500">Sesuaikan audio tombol cepat dan jaringan</p>
+                  <p className="text-[11px] text-slate-500">Atur tombol siaran, codec, dan jaringan</p>
                 </div>
               </div>
               <button 
@@ -4136,7 +4028,7 @@ export default function App() {
             <form onSubmit={handleSaveSettings} className="space-y-4">
               {/* Seksi Tombol Cepat */}
               <div>
-                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-semibold text-slate-800 mb-2">
                   Audio Tombol Cepat
                 </label>
                 <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
@@ -4184,9 +4076,27 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <label htmlFor="audio-codec" className="block text-xs font-semibold text-slate-800">Codec siaran RTP</label>
+                <CustomDropdown
+                  id="audio-codec"
+                  value={settings.audio_codec || 'g722'}
+                  onChange={value => setSettings({ ...settings, audio_codec: value })}
+                  options={[
+                    { value: 'g722', label: 'G.722 · 16 kHz' },
+                    { value: 'pcma', label: 'G.711A / PCMA · 8 kHz' },
+                    { value: 'pcmu', label: 'G.711U / PCMU · 8 kHz' },
+                    { value: 'opus', label: 'OPUS · 48 kHz' }
+                  ]}
+                  className="w-full"
+                  buttonClassName="w-full bg-white justify-between"
+                />
+                <p className="text-[11px] text-slate-500">Berlaku untuk siaran dan tes speaker berikutnya. Samakan codec pada speaker penerima.{settings.audio_codec === 'opus' ? ' OPUS memakai RTP payload type 111; sesuaikan pemetaan payload pada penerima.' : ''}</p>
+              </div>
+
               {/* Seksi Jaringan Multicast */}
               <div>
-                <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2">
+                <label className="block text-xs semibold text-slate-800 mb-2">
                   Jaringan Multicast Speaker Fisik
                 </label>
                 <div className="space-y-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
@@ -4227,6 +4137,20 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {deleteConfirmation && (
+        <div className="modal-overlay fixed inset-0 bg-slate-900/40 flex items-center justify-center p-4 z-[70]">
+          <div role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description" className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
+            <div className="flex items-start gap-3">
+              <Trash2 className="w-5 h-5 text-rose-600 shrink-0 mt-1" />
+              <div className="min-w-0"><h3 id="delete-title" className="text-base font-semibold break-words">Hapus {deleteConfirmation.name}?</h3><p id="delete-description" className="text-xs text-slate-500 mt-2">{deleteConfirmation.description} Tindakan ini tidak bisa dibatalkan.</p></div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button type="button" autoFocus onClick={() => resolveDelete(false)} className="hardware-key" onKeyDown={event => { if (event.key === 'Escape') resolveDelete(false); }}>Batal</button>
+              <button type="button" onClick={() => resolveDelete(true)} className="px-4 py-2 bg-rose-600 text-white text-xs font-semibold" onKeyDown={event => { if (event.key === 'Escape') resolveDelete(false); }}>Hapus</button>
+            </div>
           </div>
         </div>
       )}

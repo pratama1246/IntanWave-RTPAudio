@@ -6,6 +6,16 @@
 
 ---
 
+> Pembaruan 5 November 2026: arah visual terbaru mengikuti konsol audio monokrom yang dipilih pengguna. Ketentuan di bagian ini menggantikan detail visual lama di bawah.
+>
+> - Palet: putih aluminium, abu netral, dan charcoal. Warna status dan darurat tetap memiliki arti operasional.
+> - Tata letak: jam ringkas di heading; panel status siaran utama berdampingan dengan ringkasan speaker. Jadwal dan pustaka berada di bawah.
+> - Kedalaman: layar cekung, tombol timbul dengan respons tekan, dan bentuk gelombang audio dekoratif berbasis CSS. Bentuk ini bukan pengukur level audio.
+> - Animasi gelombang hanya saat siaran aktif dan dinonaktifkan untuk preferensi reduced motion.
+> - Tipografi: DM Sans untuk antarmuka, IBM Plex Mono untuk jam serta data teknis, dengan font cadangan sistem.
+> - Layar kecil menumpuk panel secara vertikal; tabel memiliki gulir horizontal lokal.
+> - Kontrol siaran, pemilihan target, konfirmasi, jadwal, dan pengelolaan perangkat menggunakan alur aplikasi yang sudah ada.
+
 ## 1. Arsitektur Tata Letak
 
 IntanWave menggunakan tata letak dua kolom seimbang agar seluruh fungsi penting dapat dipantau tanpa harus berpindah tab atau menggulir layar secara berlebihan:

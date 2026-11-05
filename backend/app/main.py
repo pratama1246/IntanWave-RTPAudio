@@ -28,6 +28,7 @@ from app.database import (
     parse_groups
 )
 from app.audio_engine import audio_engine, resolve_audio_category
+from app.audio_codecs import CODECS
 from app.scheduler import scheduler, reload_schedules, trigger_schedule_job
 from app.ping_service import ping_ip, scan_all_speakers_parallel, ping_monitor
 
@@ -787,6 +788,8 @@ def read_settings():
 
 @app.put("/api/settings")
 def save_settings(payload: dict):
+    if "audio_codec" in payload and (not isinstance(payload["audio_codec"], str) or payload["audio_codec"] not in CODECS):
+        raise HTTPException(status_code=422, detail="Codec audio tidak didukung")
     if "multicast_ip" in payload and payload["multicast_ip"]:
         payload["multicast_ip"] = validate_speaker_ip(str(payload["multicast_ip"]))
     if "multicast_port" in payload and payload["multicast_port"]:

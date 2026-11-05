@@ -37,6 +37,21 @@ The application operates entirely on local network infrastructure (LAN/VLAN) wit
 
 ---
 
+## Pilihan codec siaran RTP
+
+Buka **Pengaturan Sistem → Codec siaran RTP** untuk memilih satu codec bagi siaran dan tes speaker berikutnya. Siaran yang sedang berjalan tidak diubah. Konfigurasi codec di speaker penerima harus sesuai.
+
+| Pilihan | Sample rate | RTP payload type |
+| --- | --- | --- |
+| G.722 (default, mempertahankan engine sebelumnya) | 16 kHz | 9 |
+| G.711A / PCMA | 8 kHz | 8 |
+| G.711U / PCMU | 8 kHz | 0 |
+| OPUS | 48 kHz, mono, 64 kbit/s | 111 (dynamic) |
+
+Untuk OPUS, penerima harus mendukung pemetaan payload 111 ke Opus. Pemilihan codec tidak mengubah transport RTP dan tidak mengonfigurasi perangkat speaker secara otomatis. G.722 menggunakan RTP clock 8 kHz meskipun audio disampling 16 kHz.
+
+Validasi lokal: jalankan tes `backend/tests/test_audio_codecs.py` dari direktori backend dengan Python dan FFmpeg. Tes mengirim paket hanya ke loopback, tanpa speaker fisik. Jalankan `node frontend/tests/schedule-toggle.test.cjs` dari root untuk memeriksa toggle jadwal.
+
 ## Core Engineering Capabilities
 
 - **Telecom-Standard Audio Encoding (8 kHz G.711 A-Law)**: Audio files are transcoded on-the-fly to single-channel 8 kHz PCMA at 64 kbps, matching the native DSP decoding specification of industrial VoIP/SIP horn speakers.
