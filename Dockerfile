@@ -1,15 +1,16 @@
 # ========================================================
 # Stage 1: Build Frontend (React + Vite)
 # ========================================================
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
+RUN corepack enable && corepack prepare pnpm@12.18.0 --activate
 
 WORKDIR /app/frontend
 
-COPY frontend/package*.json ./
-RUN npm ci
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY frontend/ ./
-RUN npm run build
+RUN pnpm run build
 
 # ========================================================
 # Stage 2: Linux Runner (Python 3.12 + FFmpeg + FastAPI)

@@ -912,20 +912,28 @@ export default function App() {
   // WebSocket Live Telemetry
   useEffect(() => {
     let ws;
+    let disposed = false;
+    let reconnectTimer;
     const connectWs = () => {
+      if (disposed) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/ws`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
+        if (disposed) return;
         setWsConnected(true);
         fetchData();
       };
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        if (disposed) return;
         setWsConnected(false);
-        setTimeout(connectWs, 2000);
+        if (event.code !== 1008) {
+          reconnectTimer = setTimeout(connectWs, 2000);
+        }
       };
       ws.onmessage = (event) => {
+        if (disposed) return;
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'speakers_update' && Array.isArray(data.speakers)) {
@@ -947,6 +955,8 @@ export default function App() {
 
     connectWs();
     return () => {
+      disposed = true;
+      clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };
   }, []);
