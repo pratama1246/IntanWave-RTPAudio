@@ -121,21 +121,41 @@ app.add_middleware(
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac"}
+MAX_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
 def resolve_audio_file(filename: str, fallback_path: Optional[str] = None) -> Path:
     r"""
     Mengembalikan Path file audio yang valid secara portabel lintas OS & Docker container.
-    Mencegah bug path absolut beda OS (misal D:\... dari Windows host yang terbawa ke Linux container).
+    Menolak path traversal, backslash Windows, drive letter, maupun ekstensi di luar allowlist.
     """
-    fpath = AUDIO_DIR / filename
+    raw = (filename or "").strip()
+    if not raw or raw.startswith(".") or "/" in raw or "\\" in raw or ":" in raw or ".." in raw:
+        raise ValueError("Invalid audio filename")
+    clean_name = Path(raw).name.strip()
+    if clean_name != raw or Path(clean_name).suffix.lower() not in ALLOWED_AUDIO_EXTENSIONS:
+        raise ValueError("Invalid audio filename")
+
+    base_dir = AUDIO_DIR.resolve()
+    fpath = (base_dir / clean_name).resolve()
+    if fpath.parent != base_dir:
+        raise ValueError("Invalid audio path")
     if fpath.is_file():
         return fpath
+
     if fallback_path:
-        fb = Path(fallback_path)
-        if fb.is_file():
-            return fb
-        alt = AUDIO_DIR / fb.name
-        if alt.is_file():
-            return alt
+        fb_raw = str(fallback_path).strip()
+        fb_name = Path(fb_raw.replace("\\", "/")).name.strip()
+        if (
+            fb_name
+            and not fb_name.startswith(".")
+            and Path(fb_name).suffix.lower() in ALLOWED_AUDIO_EXTENSIONS
+        ):
+            alt = (base_dir / fb_name).resolve()
+            if alt.parent == base_dir and alt.is_file():
+                return alt
+
     return fpath
 
 def sync_audio_files_to_db():
@@ -197,20 +217,34 @@ async def upload_audio(
     display_name: Optional[str] = Form(None),
     category: Optional[str] = Form("biasa")
 ):
-    safe_filename = Path(file.filename or "").name.strip()
-    if not safe_filename or safe_filename.startswith("."):
+    raw_name = (file.filename or "").strip()
+    safe_filename = Path(raw_name.replace("\\", "/")).name.strip()
+    if not safe_filename or safe_filename.startswith(".") or any(c in safe_filename for c in ("/", "\\", ":", "\x00")):
         raise HTTPException(status_code=400, detail="Nama file tidak valid")
 
     ext = Path(safe_filename).suffix.lower()
-    if ext not in {".wav", ".mp3", ".ogg", ".flac"}:
-        raise HTTPException(status_code=400, detail="Format file harus MP3, WAV, OGG, atau FLAC")
+    if ext not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Format file harus MP3, WAV, OGG, FLAC, M4A, atau AAC")
 
-    save_path = (AUDIO_DIR / safe_filename).resolve()
-    if save_path.parent != AUDIO_DIR.resolve():
+    base_dir = AUDIO_DIR.resolve()
+    save_path = (base_dir / safe_filename).resolve()
+    if save_path.parent != base_dir:
         raise HTTPException(status_code=400, detail="Path penyimpanan file tidak valid")
 
-    with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    total_written = 0
+    try:
+        with open(save_path, "wb") as buffer:
+            while True:
+                chunk = file.file.read(65536)
+                if not chunk:
+                    break
+                total_written += len(chunk)
+                if total_written > MAX_AUDIO_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Ukuran file audio melebihi batas 50MB")
+                buffer.write(chunk)
+    except HTTPException:
+        save_path.unlink(missing_ok=True)
+        raise
 
     duration = audio_engine.get_audio_duration(str(save_path))
     raw_disp = display_name if display_name else Path(safe_filename).stem.replace("_", " ").title()
@@ -299,7 +333,10 @@ def stream_audio(audio_id: int):
 
 @app.get("/api/audio/stream-file/{filename}")
 def stream_audio_by_filename(filename: str):
-    fpath = resolve_audio_file(filename)
+    try:
+        fpath = resolve_audio_file(filename)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Nama file audio tidak valid")
     if not fpath.exists():
         raise HTTPException(status_code=404, detail="Berkas fisik tidak ditemukan")
     ext = fpath.suffix.lower()[1:]

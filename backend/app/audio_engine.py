@@ -123,7 +123,7 @@ class AudioEngine:
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 file_path
             ]
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=15)
             return float(result.stdout.strip())
         except Exception:
             return 0.0
