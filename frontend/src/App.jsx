@@ -1524,6 +1524,7 @@ export default function App() {
     setIsSavingSchedule(true);
     setScheduleError('');
     try {
+      let response;
       if (editingScheduleId) {
         response = await fetch(`/api/schedules/${editingScheduleId}`, {
           method: 'PUT',
