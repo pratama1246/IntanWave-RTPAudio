@@ -1,6 +1,6 @@
 # Design specification — IntanWave
 
-Diperbarui: 5 November 2026.
+Diperbarui: 18 November 2026.
 
 Dokumen ini menjelaskan desain yang sudah diterapkan di `frontend/src/App.jsx` dan `frontend/src/index.css`. Dokumen ini menggantikan spesifikasi tata letak sebelumnya.
 
@@ -31,7 +31,7 @@ Ruang siaran.                                      Tanggal · Jam server
 | | Status · Judul audio · Tujuan          | | Jumlah perangkat online  |
 | | Sesi aktif / antrean · Gelombang 3D    | | Ringkasan perangkat      |
 | +---------------------------------------+ |                          |
-| Siaran berikutnya         [Pilih audio]  | |                          |
+| Siaran berikutnya dan countdown         | |                          |
 | [Sirine] [K3] [Tujuan] / kontrol berhenti| | [Kelola perangkat]       |
 +-------------------------------------------+--------------------------+
 
@@ -130,3 +130,18 @@ Petunjuk harus menjelaskan bahwa codec penerima perlu disamakan. Untuk OPUS, tam
 ## Batas perubahan berikutnya
 
 Pertahankan logo berwarna, panel siaran terpadu, ukuran panel yang stabil, serta kedalaman tombol. Jangan mengembalikan bilah status terpisah atau menambahkan kembali informasi yang sama di beberapa tempat tanpa kebutuhan operasional. Sesuaikan dokumentasi ini ketika tata letak atau perilaku komponen berubah.
+
+
+## Perapian modal - 18 November 2026
+
+Semua dialog memakai komponen Modal bersama: header tetap, tombol tutup seragam, konten yang dapat digulir, dan ukuran 480/640/960 px berdasarkan kebutuhan. Fokus keyboard berada di dalam modal, Escape menutup dialog teratas, dan fokus kembali ke pemicunya setelah ditutup. Dropdown yang terbuka ditutup terlebih dahulu saat Escape ditekan.
+
+Form jadwal mengikuti urutan Audio, Waktu, dan Tujuan. Jam tambahan disimpan di bagian yang dapat dibuka; hari individual hanya ditampilkan untuk pilihan hari khusus. Tombol Batal dan Simpan berada di footer tetap. Kesalahan server tampil di form dan tidak menutup isian.
+
+Modal unggah dan edit audio memakai dropdown kategori yang sama, tanpa tiga kartu prioritas berwarna. Efek 3D dangkal dipakai secara konsisten pada tombol dan dropdown; pilihan aktif mendapat efek tekan.
+
+Pemilih tujuan tidak lagi menampilkan toolbar Pilih semua/Kosongkan per bagian. Opsi Semua speaker tetap tersedia, diikuti pilihan grup/perangkat individual. Menu membuka ke atas jika ruang di bawah sempit, dengan tinggi dibatasi area modal atau viewport.
+
+Banner jadwal berikutnya di atas tabel dihapus. Nama, waktu, hari, dan countdown jadwal terdekat hanya ditampilkan pada panel siaran utama.
+
+Tombol Pilih audio pada panel utama dihapus; pemilihan audio dilakukan lewat tab pustaka. Tombol tutup (X) menggunakan permukaan ringan tanpa shadow, sedangkan tombol aksi dan pilihan dropdown mempertahankan efek 3D dangkal. Angka countdown sirine ditampilkan sekali dengan satuan detik.

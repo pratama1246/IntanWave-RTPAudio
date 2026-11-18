@@ -1,12 +1,14 @@
+import Modal from './Modal';
+import useDropdownPosition from './useDropdownPosition';
 import { startCountdown } from './countdown';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { 
-  ChevronDown, Play, Square, Volume2, Radio, Clock, Music, 
-  Upload, Trash2, Settings, Plus, RefreshCw, Bell, 
-  Siren, HardHat, Copy, History, X, Search, 
-  Wifi, Activity, Check,
-  Headphones, Pause,
-  Layers, Edit2, AlertTriangle, ArrowRight, Users
+import {
+  ChevronDown, Play, Square, Volume2, Radio, Clock, Music,
+  Upload, Trash2, Settings, Plus, RefreshCw,
+  Siren, HardHat, Copy, History, X, Search,
+  Check,
+  Headphones,
+  Layers, Edit2, ArrowRight, Users
 } from 'lucide-react';
 
 const DAYS_CONFIG = [
@@ -34,6 +36,7 @@ function CustomDropdown({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const menuPosition = useDropdownPosition(isOpen, dropdownRef);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -94,7 +97,7 @@ function CustomDropdown({
               ? 'bg-slate-800 border-slate-700 text-slate-200 divide-y divide-slate-700/50'
               : 'bg-white border-slate-200 text-slate-700 divide-y divide-slate-100'
           } ${menuClassName}`}
-          style={{ minWidth: 'max-content' }}
+          style={menuPosition}
         >
           <div className="py-0.5 space-y-0.5">
             {safeOptions.map((option) => {
@@ -145,7 +148,6 @@ function CustomDropdown({
 
 // REUSABLE MULTI-TARGET SELECTOR (BISA CENTANG GROUP + SPEAKER SEKALIGUS)
 function MultiTargetSelector({
-  targetMode = 'all', // 'all' | 'group' | 'speaker' | 'custom' | 'hybrid'
   selectedGroups = [], // string[]
   selectedSpeakerIds = [], // number[]
   onChange, // ({ targetMode, selectedGroups, selectedSpeakerIds }) => void
@@ -161,6 +163,7 @@ function MultiTargetSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [speakerSearch, setSpeakerSearch] = useState('');
   const dropdownRef = useRef(null);
+  const menuPosition = useDropdownPosition(isOpen, dropdownRef, 360);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -186,7 +189,7 @@ function MultiTargetSelector({
 
   // Active groups with speakers
   const activeGroupsWithSpeakers = useMemo(() => {
-    return groupsList.filter(g => 
+    return groupsList.filter(g =>
       speakers.some(s => {
         const sGrps = (s.groups && Array.isArray(s.groups) ? s.groups : [s.zone || '']).map(x => String(x).toLowerCase());
         return sGrps.includes(g.toLowerCase());
@@ -195,14 +198,14 @@ function MultiTargetSelector({
   }, [groupsList, speakers]);
 
   // Online count
-  const onlineCount = useMemo(() => speakers.filter(s => s.status === 'online').length, [speakers]);
+
 
   // Filtered speakers by search term
   const filteredSpeakers = useMemo(() => {
     if (!speakerSearch.trim()) return speakers;
     const q = speakerSearch.toLowerCase();
-    return speakers.filter(s => 
-      (s.name && s.name.toLowerCase().includes(q)) || 
+    return speakers.filter(s =>
+      (s.name && s.name.toLowerCase().includes(q)) ||
       (s.ip_address && s.ip_address.includes(q)) ||
       (s.zone && s.zone.toLowerCase().includes(q))
     );
@@ -269,24 +272,9 @@ function MultiTargetSelector({
     });
   };
 
-  const handleSelectAllGroups = () => {
-    const nextGroups = [...activeGroupsWithSpeakers];
-    const nextMode = selectedSpeakerIds.length > 0 ? 'hybrid' : 'group';
-    onChange({
-      targetMode: nextMode,
-      selectedGroups: nextGroups,
-      selectedSpeakerIds
-    });
-  };
 
-  const handleClearGroups = () => {
-    const nextMode = selectedSpeakerIds.length > 0 ? 'speaker' : 'all';
-    onChange({
-      targetMode: nextMode,
-      selectedGroups: [],
-      selectedSpeakerIds
-    });
-  };
+
+
 
   const handleToggleSpeaker = (spkId) => {
     const exists = selectedSpeakerIds.includes(spkId);
@@ -306,24 +294,9 @@ function MultiTargetSelector({
     });
   };
 
-  const handleSelectAllSpeakers = () => {
-    const nextIds = speakers.map(s => s.id);
-    const nextMode = selectedGroups.length > 0 ? 'hybrid' : 'speaker';
-    onChange({
-      targetMode: nextMode,
-      selectedGroups,
-      selectedSpeakerIds: nextIds
-    });
-  };
 
-  const handleClearSpeakers = () => {
-    const nextMode = selectedGroups.length > 0 ? 'group' : 'all';
-    onChange({
-      targetMode: nextMode,
-      selectedGroups,
-      selectedSpeakerIds: []
-    });
-  };
+
+
 
   const isDark = variant === 'dark';
 
@@ -332,6 +305,7 @@ function MultiTargetSelector({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
         title={summaryLabel}
         className={`flex items-center justify-between gap-2 rounded-xl transition-all font-medium text-xs cursor-pointer outline-hidden select-none min-w-0 overflow-hidden ${
           size === 'sm' ? 'px-2.5 py-1.5' : 'px-3 py-2'
@@ -360,12 +334,12 @@ function MultiTargetSelector({
 
       {isOpen && (
         <div
-          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1.5 w-84 sm:w-96 max-w-[92vw] rounded-2xl p-3.5 z-50 shadow-2xl border animate-in fade-in zoom-in-95 duration-100 ${
+          className={`target-picker-menu absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1.5 w-84 sm:w-96 max-w-[92vw] rounded-2xl p-3.5 z-50 shadow-2xl border animate-in fade-in zoom-in-95 duration-100 ${
             isDark
               ? 'bg-slate-900 border-slate-700/80 text-slate-200 ring-1 ring-white/10'
               : 'bg-white border-slate-200 text-slate-700 shadow-xl'
           }`}
-          style={{ minWidth: '320px' }}
+          style={menuPosition}
         >
           {/* Header & Global Broadcast Option */}
           <div className="mb-3">
@@ -384,7 +358,7 @@ function MultiTargetSelector({
                     : isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                Semua Speaker Global
+                Semua speaker
               </button>
             </div>
 
@@ -396,34 +370,17 @@ function MultiTargetSelector({
           <div className="max-h-72 overflow-y-auto space-y-3.5 pr-1">
             {/* SEKSI 1: PILIH GROUP */}
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-[11px]">
+              <div className="target-section-heading flex items-center justify-between text-[11px]">
                 <span className={`font-semibold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                   <Users className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Group Area • {selectedGroups.length} dipilih</span>
+                  <span>Grup area • {selectedGroups.length} dipilih</span>
                 </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSelectAllGroups}
-                    className="text-blue-500 hover:underline cursor-pointer font-medium text-[10px]"
-                  >
-                    Pilih Semua
-                  </button>
-                  <span className="text-slate-400">•</span>
-                  <button
-                    type="button"
-                    onClick={handleClearGroups}
-                    className="text-slate-400 hover:text-rose-500 cursor-pointer text-[10px]"
-                  >
-                    Kosongkan
-                  </button>
-                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 {activeGroupsWithSpeakers.length === 0 ? (
                   <div className="col-span-2 text-center py-2 text-[11px] text-slate-400">
-                    Tidak ada group aktif.
+                    Belum ada grup berisi speaker.
                   </div>
                 ) : (
                   activeGroupsWithSpeakers.map((grp) => {
@@ -467,28 +424,11 @@ function MultiTargetSelector({
 
             {/* SEKSI 2: PILIH SPEAKER SPESIFIK */}
             <div className={`space-y-1.5 pt-2.5 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
-              <div className="flex items-center justify-between text-[11px]">
+              <div className="target-section-heading flex items-center justify-between text-[11px]">
                 <span className={`font-semibold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                   <Volume2 className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Speaker Spesifik • {selectedSpeakerIds.length} dipilih</span>
+                  <span>Speaker • {selectedSpeakerIds.length} dipilih</span>
                 </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSelectAllSpeakers}
-                    className="text-blue-500 hover:underline cursor-pointer font-medium text-[10px]"
-                  >
-                    Pilih Semua
-                  </button>
-                  <span className="text-slate-400">•</span>
-                  <button
-                    type="button"
-                    onClick={handleClearSpeakers}
-                    className="text-slate-400 hover:text-rose-500 cursor-pointer text-[10px]"
-                  >
-                    Kosongkan
-                  </button>
-                </div>
               </div>
 
               {/* Speaker Search bar */}
@@ -609,7 +549,7 @@ export default function App() {
   );
   const [speakers, setSpeakers] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [currentTime, setCurrentTime] = useState('');
+  const [, setCurrentTime] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
 
   // Local Browser Audio Preview State (HTML5 Audio, DOES NOT broadcast outside)
@@ -635,8 +575,9 @@ export default function App() {
   const [copiedSpeakerId, setCopiedSpeakerId] = useState(null);
   const [triggeringScheduleId, setTriggeringScheduleId] = useState(null);
   const isActionBusyRef = useRef(false);
-  const [isPlayingToSpeakers, setIsPlayingToSpeakers] = useState(false);
+  const [, setIsPlayingToSpeakers] = useState(false);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [scheduleError, setScheduleError] = useState('');
   const [isSavingSpeaker, setIsSavingSpeaker] = useState(false);
 
   // Modals & Navigation
@@ -759,14 +700,6 @@ export default function App() {
     }
   };
 
-  const handleAddPresetTime = (presetTime) => {
-    const current = parseScheduleTimes(newSchedule.time_str);
-    if (!current.includes(presetTime)) {
-      const updated = [...current, presetTime].sort();
-      setNewSchedule(prev => ({ ...prev, time_str: updated.join(', ') }));
-    }
-  };
-
   const handleRemoveTime = (timeToRemove) => {
     const current = parseScheduleTimes(newSchedule.time_str);
     if (current.length <= 1) {
@@ -784,7 +717,7 @@ export default function App() {
   const [serverHours, setServerHours] = useState('12');
   const [serverMinutes, setServerMinutes] = useState('00');
   const [serverSeconds, setServerSeconds] = useState('00');
-  const [serverTimeDisplay, setServerTimeDisplay] = useState('');
+  const [, setServerTimeDisplay] = useState('');
   const [serverDateDisplay, setServerDateDisplay] = useState('');
 
   // Fetch initial server time offset
@@ -949,7 +882,7 @@ export default function App() {
           } else if (data.status) {
             setPlayback(data);
           }
-        } catch (e) {}
+        } catch {}
       };
     };
 
@@ -1051,17 +984,17 @@ export default function App() {
     return speakers.filter(s => {
       const q = searchQuery.toLowerCase().trim();
       const sGroups = getSpeakerGroups(s);
-      const matchesSearch = !q || 
-        s.name.toLowerCase().includes(q) || 
-        s.ip_address.toLowerCase().includes(q) || 
+      const matchesSearch = !q ||
+        s.name.toLowerCase().includes(q) ||
+        s.ip_address.toLowerCase().includes(q) ||
         sGroups.some(g => g.toLowerCase().includes(q));
 
-      const matchesStatus = 
+      const matchesStatus =
         statusFilter === 'all' ||
         (statusFilter === 'online' && s.status === 'online') ||
         (statusFilter === 'offline' && s.status !== 'online');
 
-      const matchesGroup = 
+      const matchesGroup =
         groupFilter === 'all' || sGroups.includes(groupFilter);
 
       return matchesSearch && matchesStatus && matchesGroup;
@@ -1096,37 +1029,6 @@ export default function App() {
     }
     return 'Semua Speaker';
   }, [targetMode, selectedGroup, selectedGroups, selectedSpeakerId, selectedSpeakerIds, speakers, onlineCount]);
-
-  // Direct Target Options: Hanya menampilkan Semua Speaker, Group yang memiliki speaker terdaftar, dan Speaker tunggal
-  const targetOptions = useMemo(() => {
-    const list = [
-      { value: 'all', label: 'Semua Speaker' }
-    ];
-
-    // Hanya tampilkan group yang benar-benar memiliki speaker terdaftar!
-    const activeGroupsWithSpeakers = groupsList.filter(g => 
-      speakers.some(s => getSpeakerGroups(s).map(x => x.toLowerCase()).includes(g.toLowerCase()))
-    );
-
-    activeGroupsWithSpeakers.forEach((g) => {
-      const spkCount = speakers.filter(s => 
-        getSpeakerGroups(s).map(x => x.toLowerCase()).includes(g.toLowerCase())
-      ).length;
-      list.push({
-        value: `group:${g}`,
-        label: `Group: ${g} (${spkCount} Speaker)`
-      });
-    });
-
-    speakers.forEach((s) => {
-      list.push({
-        value: `speaker:${s.id}`,
-        label: `Speaker: ${s.name} (${s.ip_address})`
-      });
-    });
-
-    return list;
-  }, [groupsList, speakers]);
 
   // Calculate Next Upcoming Alarm based on schedule_type and days_of_week
   const getNextScheduleInfo = () => {
@@ -1554,6 +1456,7 @@ export default function App() {
       target_local: false
     });
     setScheduleTimeInput('08:00');
+    setScheduleError('');
     setShowAddSchedule(true);
   };
 
@@ -1576,6 +1479,7 @@ export default function App() {
       target_local: Boolean(schedule.target_local)
     });
     setScheduleTimeInput(existingTimes[0] || '08:00');
+    setScheduleError('');
     setShowAddSchedule(true);
   };
 
@@ -1598,6 +1502,7 @@ export default function App() {
       target_local: Boolean(schedule.target_local)
     });
     setScheduleTimeInput(existingTimes[0] || '08:00');
+    setScheduleError('');
     setShowAddSchedule(true);
   };
 
@@ -1617,25 +1522,30 @@ export default function App() {
     e.preventDefault();
     if (isSavingSchedule) return;
     setIsSavingSchedule(true);
+    setScheduleError('');
     try {
       if (editingScheduleId) {
-        await fetch(`/api/schedules/${editingScheduleId}`, {
+        response = await fetch(`/api/schedules/${editingScheduleId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newSchedule)
         });
       } else {
-        await fetch('/api/schedules', {
+        response = await fetch('/api/schedules', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newSchedule)
         });
       }
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(typeof error.detail === 'string' ? error.detail : 'Periksa isian jadwal, lalu coba lagi.');
+      }
       setShowAddSchedule(false);
       setEditingScheduleId(null);
       fetchData();
     } catch (err) {
-      alert('Gagal menyimpan jadwal: ' + err);
+      setScheduleError(err.message || 'Jadwal belum tersimpan. Coba lagi.');
     } finally {
       setIsSavingSchedule(false);
     }
@@ -1724,7 +1634,7 @@ export default function App() {
       const res = await fetch(`/api/audio/${audio.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           category: targetCategory,
           display_name: editingDisplayName.trim() || audio.display_name
         })
@@ -1736,7 +1646,7 @@ export default function App() {
         const err = await res.json().catch(() => ({}));
         alert(err.detail || 'Gagal memperbarui kategori audio');
       }
-    } catch (err) {
+    } catch {
       alert('Gagal menghubungi server');
     }
   };
@@ -1816,7 +1726,7 @@ export default function App() {
         const err = await res.json();
         alert(err.detail || 'Gagal menambah group');
       }
-    } catch (err) {
+    } catch {
       alert('Gagal menghubungi server');
     }
   };
@@ -1841,7 +1751,7 @@ export default function App() {
         const err = await res.json();
         alert(err.detail || 'Gagal mengubah group');
       }
-    } catch (err) {
+    } catch {
       alert('Gagal menghubungi server');
     }
   };
@@ -1859,7 +1769,7 @@ export default function App() {
         const err = await res.json();
         alert(err.detail || 'Gagal menghapus group');
       }
-    } catch (err) {
+    } catch {
       alert('Gagal menghubungi server');
     }
   };
@@ -1987,7 +1897,7 @@ export default function App() {
     activeSessions.some(s => s.priority === 1 || (s.category || '').toLowerCase() === 'darurat' || (s.title || '').toLowerCase().includes('sirine') || (s.title || '').toLowerCase().includes('darurat') || (s.title || '').toLowerCase().includes('ews')) ||
     playback.priority === 1 ||
     (playback.category || '').toLowerCase() === 'darurat' ||
-    (playback.title || '').toLowerCase().includes('sirine') || 
+    (playback.title || '').toLowerCase().includes('sirine') ||
     (playback.title || '').toLowerCase().includes('darurat') ||
     (playback.title || '').toLowerCase().includes('ews')
   );
@@ -2011,10 +1921,10 @@ export default function App() {
           {/* Logo & Online Quick Pill */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2.5">
-              <img 
-                src="/logo.png" 
-                alt="IntanWave Logo" 
-                className="w-8.5 h-8.5 rounded-xl object-contain shadow-xs bg-white" 
+              <img
+                src="/logo.png"
+                alt="IntanWave Logo"
+                className="w-8.5 h-8.5 rounded-xl object-contain shadow-xs bg-white"
               />
               <div className="flex items-center gap-2">
                 <span className="text-base font-semibold text-slate-900 leading-none">IntanWave</span>
@@ -2027,7 +1937,7 @@ export default function App() {
               <div className="flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-700 border border-sky-200 animate-pulse">
                 <Headphones className="w-3.5 h-3.5 text-sky-600" />
                 <span>Pratinjau Web Aktif</span>
-                <button 
+                <button
                   onClick={handleStopBrowserPreview}
                   className="text-sky-800 hover:text-rose-600 font-bold ml-1"
                   title="Hentikan Pratinjau Web"
@@ -2043,8 +1953,8 @@ export default function App() {
 
             {/* Server Connection Indicator */}
             <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-              wsConnected 
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+              wsConnected
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                 : 'bg-rose-50 text-rose-700 border-rose-200'
             }`}>
               <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
@@ -2052,7 +1962,7 @@ export default function App() {
             </div>
 
             {/* Activity Logs Trigger */}
-            <button 
+            <button
               onClick={() => setShowLogsModal(true)}
               className="p-2 text-slate-600 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
               title="Riwayat Aktivitas"
@@ -2061,7 +1971,7 @@ export default function App() {
             </button>
 
             {/* Network Settings Trigger */}
-            <button 
+            <button
               onClick={() => setShowSettings(true)}
               className="p-2 text-slate-600 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
               title="Pengaturan Jaringan"
@@ -2089,7 +1999,7 @@ export default function App() {
               <div className="display-copy">
                 <span className="display-state"><i className={isPlaying ? 'led live' : 'led'} />{hasEmergency ? 'Siaran darurat' : hasSafety ? 'Siaran keselamatan' : isPlaying ? 'Sedang mengudara' : 'Sistem siaga'}</span>
                 <h2>{isPlaying ? (hasMultipleSessions ? activeSessions.length + ' zona mengudara' : playback.title) : 'Belum ada siaran aktif.'}</h2>
-                <p>{isPlaying ? (playback.target_desc || 'Siaran sedang berlangsung') : 'Pilih speaker tujuan, lalu pilih audio.'}</p>
+                <p>{isPlaying ? (playback.target_desc || 'Siaran sedang berlangsung') : 'Pilih tujuan dan siarkan audio melalui pustaka.'}</p>
             {hasMultipleSessions && (
               <div className="session-list">
                 {activeSessions.map(session => (
@@ -2106,8 +2016,7 @@ export default function App() {
               <div className="sound-sculpture" aria-hidden="true">{[28, 52, 80, 108, 80, 52, 28].map((height, i) => <span key={i} style={{ '--bar-height': height + 'px', '--bar-delay': i * 0.12 + 's' }} />)}</div>
             </div>
             <div className="deck-bottom">
-              <div className="next-cue"><span>Siaran berikutnya</span><strong>{nextSchedule ? nextSchedule.time_str + ' · ' + nextSchedule.name : 'Belum ada jadwal aktif'}</strong></div>
-              <button className="hardware-key primary-key" onClick={() => setActiveMainTab('audio')}><Music size={15} />Pilih audio<ArrowRight size={14} /></button>
+              <div className="next-cue"><span>Siaran berikutnya</span><strong>{nextSchedule ? nextSchedule.time_str + ' · ' + nextSchedule.name : 'Belum ada jadwal aktif'}</strong>{nextSchedule && <small className="next-cue-countdown">{nextSchedule.dayLabel} - {nextSchedule.countdown} lagi</small>}</div>
             </div>
             <div className="deck-controls">
           {/* Soundboard Mini & Controls */}
@@ -2120,7 +2029,7 @@ export default function App() {
                       {formatSec(playback.elapsed)} / {formatSec(playback.duration)}
                     </span>
                     <div className="w-16 sm:w-28 bg-black/30 rounded-full h-1.5 overflow-hidden">
-                      <div 
+                      <div
                         className="bg-emerald-400 h-full transition-all duration-300"
                         style={{ width: `${playback.duration ? Math.min(100, (playback.elapsed / playback.duration) * 100) : 0}%` }}
                       />
@@ -2128,7 +2037,7 @@ export default function App() {
                   </div>
                 )}
 
-                <button 
+                <button
                   onClick={handleStop}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
                   title="Hentikan semua siaran audio yang sedang aktif"
@@ -2234,7 +2143,7 @@ export default function App() {
           {/* Primary Action Button */}
           <div className="flex items-center gap-2">
             {activeMainTab === 'schedules' ? (
-              <button 
+              <button
                 onClick={handleOpenAddSchedule}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
               >
@@ -2242,7 +2151,7 @@ export default function App() {
                 <span>Tambah Jadwal</span>
               </button>
             ) : (
-              <button 
+              <button
                 onClick={() => handleOpenUploadModal()}
                 disabled={isUploading}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer disabled:opacity-50"
@@ -2257,33 +2166,13 @@ export default function App() {
         {/* TAB 1: JADWAL SIARAN (ALARM-FIRST TABLE) */}
         {activeMainTab === 'schedules' && (
           <div className="space-y-3">
-            {/* Ticker Next Alarm Card */}
-            <div className="p-3 rounded-xl bg-white border border-slate-200/90 shadow-2xs flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2 text-slate-600 min-w-0">
-                <Clock className="w-4 h-4 text-blue-600 shrink-0" />
-                <span className="font-semibold text-slate-700 shrink-0">Siaran berikutnya:</span>
-                {nextSchedule ? (
-                  <span className="truncate text-slate-900 font-semibold">
-                    {nextSchedule.time_str} • {nextSchedule.name} • {nextSchedule.dayLabel}
-                  </span>
-                ) : (
-                  <span className="text-slate-400">Tidak ada jadwal aktif</span>
-                )}
-              </div>
-              {nextSchedule && (
-                <span className="text-blue-700 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-full font-semibold shrink-0 text-[11px]">
-                  {nextSchedule.countdown}
-                </span>
-              )}
-            </div>
-
             {/* Alarm Table */}
             <div className="border border-slate-200/90 rounded-xl overflow-hidden bg-white shadow-2xs">
               {schedules.length === 0 ? (
                 <div className="p-12 text-center space-y-3">
                   <Clock className="w-10 h-10 text-slate-300 mx-auto" />
                   <p className="text-xs font-medium text-slate-700">Belum ada jadwal tersimpan</p>
-                  <button 
+                  <button
                     onClick={handleOpenAddSchedule}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-semibold transition-colors cursor-pointer"
                   >
@@ -2306,7 +2195,7 @@ export default function App() {
                       {schedules.map((s) => {
                         const isPreviewThis = previewingId === `sched_${s.id}` && isPreviewPlaying;
                         return (
-                          <tr 
+                          <tr
                             key={s.id}
                             className={`hover:bg-slate-50/80 transition-colors ${
                               s.enabled ? 'bg-white' : 'bg-slate-50/40 text-slate-400'
@@ -2340,7 +2229,7 @@ export default function App() {
                                 const allTimes = parseScheduleTimes(s.time_str);
                                 if (allTimes.length === 1) {
                                   return (
-                                    <span 
+                                    <span
                                       className={`text-xl font-semibold tracking-tight ${
                                         s.enabled ? 'text-slate-900' : 'text-slate-400'
                                       }`}
@@ -2355,16 +2244,16 @@ export default function App() {
                                 const hasMore = allTimes.length > maxVisible;
 
                                 return (
-                                  <div 
-                                    className="inline-flex items-center gap-1.5 whitespace-nowrap min-w-0" 
+                                  <div
+                                    className="inline-flex items-center gap-1.5 whitespace-nowrap min-w-0"
                                     title={`Semua jam siar: ${allTimes.join(', ')}`}
                                   >
                                     {visibleTimes.map((t, idx) => (
-                                      <span 
+                                      <span
                                         key={idx}
                                         className={`px-2 py-0.5 rounded-md text-xs font-semibold tracking-normal border ${
-                                          s.enabled 
-                                            ? 'bg-slate-100 text-slate-900 border-slate-200/80 shadow-2xs' 
+                                          s.enabled
+                                            ? 'bg-slate-100 text-slate-900 border-slate-200/80 shadow-2xs'
                                             : 'bg-slate-100 text-slate-400 border-slate-200/50'
                                         }`}
                                       >
@@ -2372,10 +2261,10 @@ export default function App() {
                                       </span>
                                     ))}
                                     {hasMore && (
-                                      <span 
+                                      <span
                                         className={`px-1.5 py-0.5 rounded-md text-xs font-semibold tracking-normal border cursor-default select-none ${
-                                          s.enabled 
-                                            ? 'bg-slate-100 text-slate-900 border-slate-200/80 shadow-2xs' 
+                                          s.enabled
+                                            ? 'bg-slate-100 text-slate-900 border-slate-200/80 shadow-2xs'
                                             : 'bg-slate-100 text-slate-400 border-slate-200/50'
                                         }`}
                                         title={`Semua jam siar: ${allTimes.join(', ')}`}
@@ -2390,7 +2279,7 @@ export default function App() {
 
                             {/* Nama Jadwal & Audio & Target */}
                             <td className="py-3 px-4 min-w-0 max-w-[320px] lg:max-w-[420px]">
-                              <div 
+                              <div
                                 className={`font-semibold text-sm leading-snug truncate ${
                                   s.enabled ? 'text-slate-900' : 'text-slate-500'
                                 }`}
@@ -2399,7 +2288,7 @@ export default function App() {
                                 {s.name}
                               </div>
                               <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-1 min-w-0">
-                                <div 
+                                <div
                                   className="flex items-center gap-1 min-w-0 max-w-[150px] sm:max-w-[200px] md:max-w-[260px] truncate"
                                   title={s.audio_title || 'Audio default'}
                                 >
@@ -2410,7 +2299,7 @@ export default function App() {
                                 {(() => {
                                   const targetText = getScheduleTargetBadge(s);
                                   return (
-                                    <span 
+                                    <span
                                       className="inline-flex items-center text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60 min-w-0 max-w-[130px] sm:max-w-[180px] shrink-0"
                                       title={targetText}
                                     >
@@ -2445,7 +2334,7 @@ export default function App() {
                                 </button>
 
                                 {/* Tes Bunyikan Jadwal Ini (Sesuai Target Jadwal) */}
-                                <button 
+                                <button
                                   onClick={() => handleTriggerSchedule(s)}
                                   disabled={triggeringScheduleId === s.id}
                                   title={`Uji siarkan jadwal "${s.name}" sekarang (ke target: ${getScheduleTargetBadge(s)})`}
@@ -2459,7 +2348,7 @@ export default function App() {
                                 </button>
 
                                 {/* Salin */}
-                                <button 
+                                <button
                                   onClick={() => handleDuplicateSchedule(s)}
                                   title="Salin jadwal ini"
                                   className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
@@ -2468,7 +2357,7 @@ export default function App() {
                                 </button>
 
                                 {/* Edit */}
-                                <button 
+                                <button
                                   onClick={() => handleOpenEditSchedule(s)}
                                   title="Edit jadwal ini"
                                   className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
@@ -2477,7 +2366,7 @@ export default function App() {
                                 </button>
 
                                 {/* Hapus */}
-                                <button 
+                                <button
                                   onClick={() => handleDeleteSchedule(s.id)}
                                   title="Hapus jadwal"
                                   className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
@@ -2523,11 +2412,11 @@ export default function App() {
                 <div className="p-12 text-center space-y-3">
                   <Music className="w-10 h-10 text-slate-300 mx-auto" />
                   <p className="text-xs font-medium text-slate-700">
-                    {audioList.length === 0 
-                      ? 'Belum ada berkas audio tersimpan' 
+                    {audioList.length === 0
+                      ? 'Belum ada berkas audio tersimpan'
                       : 'Tidak ada berkas audio untuk kategori ini'}
                   </p>
-                  <button 
+                  <button
                     onClick={() => handleOpenUploadModal()}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-semibold transition-colors cursor-pointer"
                   >
@@ -2553,8 +2442,8 @@ export default function App() {
                         const isDarurat = (a.category || 'biasa') === 'darurat';
                         const isSafety = (a.category || '').toLowerCase() === 'safety';
                         return (
-                          <tr 
-                            key={a.id} 
+                          <tr
+                            key={a.id}
                             className={`transition-colors ${
                               isDarurat ? 'bg-rose-50/25 hover:bg-rose-50/50' : isSafety ? 'bg-amber-50/25 hover:bg-amber-50/50' : 'hover:bg-slate-50/80'
                             }`}
@@ -2614,7 +2503,7 @@ export default function App() {
                             <td className="py-3 px-4 text-right pr-6 whitespace-nowrap">
                               <div className="inline-flex items-center gap-1 justify-end">
                                 {/* Dengar di Web */}
-                                <button 
+                                <button
                                   onClick={() => handleBrowserPreview(`/api/audio/${a.id}/stream`, `lib_${a.id}`)}
                                   className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
                                     isPreviewThis
@@ -2627,11 +2516,11 @@ export default function App() {
                                 </button>
 
                                 {/* Putar ke Speaker Luar */}
-                                <button 
+                                <button
                                   onClick={() => setPlayConfirmAudio(a)}
                                   className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                                    isDarurat 
-                                      ? 'text-rose-600 hover:bg-rose-100/70 hover:text-rose-700' 
+                                    isDarurat
+                                      ? 'text-rose-600 hover:bg-rose-100/70 hover:text-rose-700'
                                       : isSafety
                                         ? 'text-amber-600 hover:bg-amber-100/70 hover:text-amber-700'
                                         : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
@@ -2642,7 +2531,7 @@ export default function App() {
                                 </button>
 
                                 {/* Ubah Prioritas / Edit */}
-                                <button 
+                                <button
                                   onClick={() => handleRequestChangeCategory(a, a.category || 'biasa')}
                                   className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                                   title="Ubah prioritas atau nama audio"
@@ -2651,7 +2540,7 @@ export default function App() {
                                 </button>
 
                                 {/* Hapus */}
-                                <button 
+                                <button
                                   onClick={() => handleDeleteAudio(a.id)}
                                   className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                                   title="Hapus berkas"
@@ -2668,12 +2557,12 @@ export default function App() {
                 </div>
               )}
 
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFilePickedForUpload} 
-                accept=".mp3,.wav,.ogg,.flac" 
-                className="hidden" 
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFilePickedForUpload}
+                accept=".mp3,.wav,.ogg,.flac"
+                className="hidden"
               />
             </div>
           </div>
@@ -2700,30 +2589,7 @@ export default function App() {
       {/* MODAL: MONITORING & MANAJEMEN SPEAKER                     */}
       {/* ========================================================= */}
       {showSpeakerMonitorModal && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-4xl max-h-[88vh] flex flex-col p-5 shadow-xl">
-            {/* Header Modal */}
-            <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <img src="/logo.png" alt="IntanWave Logo" className="w-9 h-9 rounded-xl object-contain shadow-2xs bg-slate-50 p-1 border border-slate-100" />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-semibold text-slate-900">Monitoring & Status Speaker</h3>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      {onlineCount}/{speakers.length} Online
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">Pantau status jaringan, latensi ping, dan uji tembak audio horn di lapangan</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowSpeakerMonitorModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+        <Modal title={<> Monitoring & Status Speaker </>} description={<> Pantau status jaringan, latensi ping, dan uji tembak audio horn di lapangan </>} onClose={() => setShowSpeakerMonitorModal(false)} size="wide">
 
             {/* Filter Toolbar */}
             <div className="flex flex-wrap items-center justify-between gap-2.5 py-3 border-b border-slate-100 text-xs">
@@ -2735,11 +2601,12 @@ export default function App() {
                     type="text"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    placeholder="Cari nama, IP, group..."
+                    aria-label="Cari speaker"
+                    placeholder="Cari nama atau alamat IP"
                     className="w-full pl-8 pr-2.5 py-1.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden bg-slate-50/50"
                   />
                   {searchQuery && (
-                    <button 
+                    <button
                       onClick={() => setSearchQuery('')}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
                     >
@@ -2836,8 +2703,8 @@ export default function App() {
                         <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="py-2 px-3.5 whitespace-nowrap">
                             <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
-                              isOnline 
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                              isOnline
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                 : 'bg-rose-50 text-rose-700 border-rose-200'
                             }`}>
                               <span className={`w-1.5 h-1.5 rounded-full ${
@@ -2868,8 +2735,8 @@ export default function App() {
                           <td className="py-2 px-3 whitespace-nowrap">
                             <div className="inline-flex items-center gap-1 text-slate-600 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100 text-[11px]">
                               <span>
-                                {s.ip_address?.startsWith('pending-') 
-                                  ? 'Menunggu DHCP...' 
+                                {s.ip_address?.startsWith('pending-')
+                                  ? 'Menunggu DHCP...'
                                   : `${s.ip_address}:${s.port || 5004}`}
                               </span>
                               {!s.ip_address?.startsWith('pending-') && (
@@ -2889,8 +2756,8 @@ export default function App() {
                                 onClick={() => handleTestPhysicalSpeaker(s)}
                                 disabled={isTestingThis}
                                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                                  isTestingThis 
-                                    ? 'bg-blue-100 text-blue-700 animate-pulse' 
+                                  isTestingThis
+                                    ? 'bg-blue-100 text-blue-700 animate-pulse'
                                     : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
                                 }`}
                                 title="Kirim suara tes ke speaker fisik ini"
@@ -2934,7 +2801,7 @@ export default function App() {
             </div>
 
             {/* Modal Footer */}
-            <div className="pt-2 flex justify-end">
+            <div className="modal-actions pt-2 flex justify-end">
               <button
                 type="button"
                 onClick={() => setShowSpeakerMonitorModal(false)}
@@ -2943,33 +2810,20 @@ export default function App() {
                 Tutup
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL: TAMBAH / EDIT SPEAKER                               */}
       {/* ========================================================= */}
       {showSpeakerModal && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
-            <div className="flex items-center justify-between mb-3.5">
-              <div>
-                <h3 className="text-base font-semibold text-slate-900">
-                  {editingSpeaker ? 'Edit Konfigurasi Speaker' : 'Tambah Speaker Baru'}
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">Pengaturan perangkat IP Speaker Fisik</p>
-              </div>
-              <button onClick={() => setShowSpeakerModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-4.5 h-4.5" />
-              </button>
-            </div>
+        <Modal title={<> {editingSpeaker ? 'Edit Konfigurasi Speaker' : 'Tambah Speaker Baru'} </>} description={<> Pengaturan perangkat IP Speaker Fisik </>} onClose={() => setShowSpeakerModal(false)} size="md">
 
             <form onSubmit={handleSaveSpeaker} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Nama Speaker</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
                   placeholder="Contoh: Dermaga 7 / Pos Keamanan"
                   value={speakerForm.name}
@@ -2981,8 +2835,8 @@ export default function App() {
               <div className="grid grid-cols-3 gap-2.5">
                 <div className="col-span-2">
                   <label className="block text-xs font-medium text-slate-700 mb-1">Alamat IP</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     required
                     placeholder="192.168.1.100"
                     value={speakerForm.ip_address}
@@ -2993,8 +2847,8 @@ export default function App() {
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">Port RTP</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     required
                     value={speakerForm.port}
                     onChange={e => setSpeakerForm({ ...speakerForm, port: parseInt(e.target.value) || 5004 })}
@@ -3008,8 +2862,8 @@ export default function App() {
                   <label className="block text-xs font-medium text-slate-700">Group Audio</label>
                   <span className="text-[11px] text-slate-400">Pilih satu atau beberapa group</span>
                 </div>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
                   placeholder="Ketik nama group, pisahkan koma untuk beberapa group: Kantor, Satpam"
                   value={speakerForm.groupsText || ''}
@@ -3042,16 +2896,16 @@ export default function App() {
                 )}
               </div>
 
-              <div className="pt-1.5 flex justify-end gap-2">
-                <button 
-                  type="button" 
+              <div className="modal-actions pt-1.5 flex justify-end gap-2">
+                <button
+                  type="button"
                   onClick={() => setShowSpeakerModal(false)}
                   className="px-3.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100"
                 >
                   Batal
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={isSavingSpeaker}
                   className="px-3.5 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
@@ -3059,37 +2913,16 @@ export default function App() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL: KONFIRMASI SIARAN SIRINE DARURAT                    */}
       {/* ========================================================= */}
       {showSirenConfirmModal && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
-            <div className="flex items-start gap-3.5">
-              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 shrink-0">
-                <Siren className="w-6 h-6 text-rose-600 animate-pulse" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-base font-semibold text-slate-900 leading-snug">
-                  Konfirmasi Siaran Sirine Darurat
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Sirine akan disiarkan 5 detik setelah konfirmasi. Pastikan tujuan siaran sudah benar. Hitung mundur bisa dibatalkan.
-                </p>
-              </div>
-              <button 
-                onClick={closeSirenModal}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+        <Modal title={<> Konfirmasi Siaran Sirine Darurat </>} description={<> Sirine akan disiarkan 5 detik setelah konfirmasi. Pastikan tujuan siaran sudah benar. Hitung mundur bisa dibatalkan. </>} onClose={closeSirenModal} size="md">
 
-            {sirenCountdown !== null && <div className="siren-countdown" role="status" aria-live="polite"><strong>{sirenCountdown}</strong><span>Sirine akan disiarkan dalam {sirenCountdown} detik</span></div>}
+            {sirenCountdown !== null && <div className="siren-countdown" role="status" aria-live="polite"><strong>{sirenCountdown}<small>detik</small></strong><span>Sirine akan disiarkan. Masih bisa dibatalkan.</span></div>}
             <div className="mt-4 p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 font-medium">Target Siaran:</span>
@@ -3112,7 +2945,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="mt-5 flex items-center justify-end gap-2">
+            <div className="modal-actions mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={closeSirenModal}
@@ -3139,51 +2972,18 @@ export default function App() {
                 <span>{sirenCountdown !== null ? 'Menunggu hitung mundur' : 'Mulai hitung mundur'}</span>
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL: KONFIRMASI SIARAN AUDIO DARI TABEL                */}
       {/* ========================================================= */}
       {playConfirmAudio && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl animate-in fade-in zoom-in-95 duration-100">
-            <div className="flex items-start gap-3.5">
-              <div className={`p-2.5 rounded-xl border shrink-0 ${
-                playConfirmAudio.category === 'darurat'
-                  ? 'bg-rose-50 border-rose-200'
-                  : playConfirmAudio.category === 'safety'
-                    ? 'bg-amber-50 border-amber-200'
-                    : 'bg-blue-50 border-blue-200'
-              }`}>
-                {playConfirmAudio.category === 'darurat' ? (
-                  <Siren className="w-6 h-6 text-rose-600 animate-pulse" />
-                ) : playConfirmAudio.category === 'safety' ? (
-                  <HardHat className="w-6 h-6 text-amber-600" />
-                ) : (
-                  <img src="/logo.png" alt="IntanWave Logo" className="w-6 h-6 object-contain" />
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-base font-semibold text-slate-900 leading-snug">
-                  {playConfirmAudio.category === 'darurat' 
-                    ? 'Konfirmasi Siaran Audio Darurat' 
-                    : 'Konfirmasi Siaran Audio'}
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  {playConfirmAudio.category === 'darurat'
+        <Modal title={<> {playConfirmAudio.category === 'darurat'
+                    ? 'Konfirmasi Siaran Audio Darurat'
+                    : 'Konfirmasi Siaran Audio'} </>} description={<> {playConfirmAudio.category === 'darurat'
                     ? 'Peringatan: Berkas audio ini berkategori Darurat dan akan disiarkan langsung ke speaker IP fisik.'
-                    : 'Audio ini akan disiarkan langsung ke speaker IP fisik sesuai target siaran yang aktif.'}
-                </p>
-              </div>
-              <button 
-                onClick={() => setPlayConfirmAudio(null)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+                    : 'Audio ini akan disiarkan langsung ke speaker IP fisik sesuai target siaran yang aktif.'} </>} onClose={() => setPlayConfirmAudio(null)} size="md">
 
             <div className="mt-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -3211,7 +3011,7 @@ export default function App() {
               <span>Ingin mendengar sendiri dulu tanpa siaran ke luar? Gunakan tombol <strong>Headphone</strong> di baris tabel.</span>
             </div>
 
-            <div className="mt-5 flex items-center justify-end gap-2">
+            <div className="modal-actions mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setPlayConfirmAudio(null)}
@@ -3236,293 +3036,49 @@ export default function App() {
                 <span>Ya, Siarkan Sekarang</span>
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL: TAMBAH / SALIN JADWAL                               */}
       {/* ========================================================= */}
       {showAddSchedule && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
-            <div className="flex items-center justify-between mb-3.5">
-              <h3 className="text-base font-semibold text-slate-900">{editingScheduleId ? 'Edit Jadwal Siaran' : 'Tambah Jadwal Siaran'}</h3>
-              <button onClick={() => setShowAddSchedule(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-4.5 h-4.5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveSchedule} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Nama Jadwal</label>
-                <input 
-                  type="text" 
-                  required
-                  placeholder="Contoh: Apel Pagi"
-                  value={newSchedule.name}
-                  onChange={e => setNewSchedule({ ...newSchedule, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
-                />
+        <Modal footer={<>{scheduleError && <p className="form-error" role="alert">{scheduleError}</p>}<button type="button" onClick={() => setShowAddSchedule(false)} disabled={isSavingSchedule}>Batal</button><button type="submit" form="schedule-form" className="modal-primary" disabled={isSavingSchedule || !audioList.length}>{isSavingSchedule ? 'Menyimpan...' : 'Simpan jadwal'}</button></>} title={editingScheduleId ? 'Edit jadwal' : 'Tambah jadwal'} description="Pilih audio, waktu siaran, dan speaker tujuan." onClose={() => setShowAddSchedule(false)} size="lg">
+          <form id="schedule-form" onSubmit={handleSaveSchedule} className="schedule-form">
+            <fieldset className="form-section">
+              <legend>Audio siaran</legend>
+              <div className="form-field"><label htmlFor="schedule-name">Nama jadwal</label><input id="schedule-name" required autoComplete="off" placeholder="Contoh: Apel pagi" value={newSchedule.name} onChange={e => setNewSchedule({ ...newSchedule, name: e.target.value })} /></div>
+              <div className="form-field"><label htmlFor="schedule-audio">Berkas audio</label>
+                <CustomDropdown id="schedule-audio" value={newSchedule.audio_file_id} onChange={value => setNewSchedule({ ...newSchedule, audio_file_id: parseInt(value, 10) })} options={audioList.map(audio => ({ value: audio.id, label: audio.display_name, sublabel: formatSec(audio.duration) + ' - ' + (audio.category === 'darurat' ? 'Darurat' : audio.category === 'safety' ? 'K3 & Safety' : 'Rutin') }))} className="w-full" buttonClassName="w-full bg-white justify-between" placeholder="Pilih audio" />
+                {!audioList.length && <p className="field-hint">Unggah audio di pustaka sebelum membuat jadwal.</p>}
               </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Berkas Audio</label>
-                <CustomDropdown
-                  value={newSchedule.audio_file_id}
-                  onChange={val => setNewSchedule({ ...newSchedule, audio_file_id: parseInt(val) })}
-                  options={audioList.map(a => ({
-                    value: a.id,
-                    label: a.category === 'darurat' ? `[Darurat] ${a.display_name}` : a.category === 'safety' ? `[K3] ${a.display_name}` : a.display_name,
-                    sublabel: `${a.category === 'darurat' ? 'Darurat' : a.category === 'safety' ? 'K3 & Safety' : 'Rutin'} • ${a.filename} • ${formatSec(a.duration)}`
-                  }))}
-                  variant="light"
-                  className="w-full"
-                  buttonClassName="w-full bg-white justify-between"
-                  placeholder="Pilih berkas audio..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Target Siaran</label>
-                <MultiTargetSelector
-                  targetMode={newSchedule.target_mode || 'all'}
-                  selectedGroups={newSchedule.target_group ? newSchedule.target_group.split(',').map(s => s.trim()).filter(Boolean) : []}
-                  selectedSpeakerIds={newSchedule.target_speakers ? newSchedule.target_speakers.split(',').map(s => parseInt(s.trim(), 10)).filter(Boolean) : (newSchedule.target_speaker_id ? [newSchedule.target_speaker_id] : [])}
-                  onChange={({ targetMode: tm, selectedGroups: sg, selectedSpeakerIds: spids }) => {
-                    setNewSchedule(prev => ({
-                      ...prev,
-                      target_mode: tm,
-                      target_group: sg.join(', '),
-                      target_zone: sg.join(', '),
-                      target_speakers: spids.join(', '),
-                      target_speaker_id: spids[0] || 0
-                    }));
-                  }}
-                  speakers={speakers}
-                  groupsList={groupsList}
-                  variant="light"
-                  size="md"
-                  align="left"
-                  buttonClassName="w-full bg-white justify-between"
-                  className="w-full"
-                />
-              </div>
-
-              <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={newSchedule.target_local}
-                  onChange={event => setNewSchedule({ ...newSchedule, target_local: event.target.checked })}
-                />
-                Putar juga di speaker server
-              </label>
-
-              {/* Multi-Time Picker */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Waktu Siar</span>
-                  </label>
-                  <span className="text-[11px] font-medium text-slate-400">
-                    {parseScheduleTimes(newSchedule.time_str).length} jam dipilih
-                  </span>
-                </div>
-
-                {/* List of active time badges */}
-                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 mb-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {parseScheduleTimes(newSchedule.time_str).map((t, idx) => (
-                      <span 
-                        key={idx}
-                        className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-white border border-blue-200/80 text-blue-700 text-xs font-semibold shadow-2xs"
-                      >
-                        <span>{t}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveTime(t)}
-                          className="p-0.5 rounded-md hover:bg-red-50 hover:text-red-600 text-slate-400 cursor-pointer transition-colors"
-                          title="Hapus jam ini"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </span>
-                    ))}
-                    {parseScheduleTimes(newSchedule.time_str).length === 0 && (
-                      <span className="text-xs text-amber-600 italic">Pilih minimal 1 jam siaran</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Input tambah jam & preset */}
-                <div className="flex flex-wrap items-center gap-2 mb-3">
-                  <div className="flex items-center gap-1.5">
-                    <input 
-                      type="time" 
-                      value={scheduleTimeInput}
-                      onChange={e => setScheduleTimeInput(e.target.value)}
-                      className="px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-hidden bg-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddTime}
-                      className="px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium cursor-pointer transition-colors flex items-center gap-1 shadow-2xs"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Tambah Jam</span>
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-1 text-[11px] text-slate-500 sm:ml-auto">
-                    <span className="text-slate-400">Preset:</span>
-                    <button 
-                      type="button" 
-                      onClick={() => handleAddPresetTime('08:00')} 
-                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 cursor-pointer transition-colors"
-                    >
-                      08:00
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => handleAddPresetTime('11:45')} 
-                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 cursor-pointer transition-colors"
-                    >
-                      11:45
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => handleAddPresetTime('15:00')} 
-                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 cursor-pointer transition-colors"
-                    >
-                      15:00
-                    </button>
-                    <button 
-                      type="button" 
-                      onClick={() => handleAddPresetTime('17:00')} 
-                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 cursor-pointer transition-colors"
-                    >
-                      17:00
-                    </button>
-                  </div>
+            </fieldset>
+            <fieldset className="form-section">
+              <legend>Waktu siaran</legend>
+              <div className="form-columns">
+                <div className="form-field"><label htmlFor="schedule-time">Jam pertama (WIB)</label><input id="schedule-time" type="time" required value={parseScheduleTimes(newSchedule.time_str)[0]} onChange={e => { if (!e.target.value) return; const times = parseScheduleTimes(newSchedule.time_str); setNewSchedule({ ...newSchedule, time_str: [...new Set([e.target.value, ...times.slice(1)])].join(', ') }); }} /></div>
+                <div className="form-field"><label htmlFor="schedule-repeat">Pengulangan</label>
+                  <CustomDropdown id="schedule-repeat" value={newSchedule.schedule_type === 'custom' && newSchedule.days_of_week === 'sat,sun' ? 'weekends' : newSchedule.schedule_type} onChange={value => { if (['daily', 'weekdays', 'weekends'].includes(value)) setSchedulePreset(value); else setNewSchedule({ ...newSchedule, schedule_type: value }); }} options={[{ value: 'daily', label: 'Setiap hari' }, { value: 'weekdays', label: 'Senin - Jumat' }, { value: 'weekends', label: 'Sabtu - Minggu' }, { value: 'custom', label: 'Pilih hari' }, { value: 'once', label: 'Sekali siar' }]} className="w-full" buttonClassName="w-full bg-white justify-between" />
                 </div>
               </div>
-
-              {/* Pengulangan */}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Pengulangan Hari</label>
-                <CustomDropdown
-                  value={newSchedule.schedule_type}
-                  onChange={val => {
-                    if (val === 'daily') setSchedulePreset('daily');
-                    else if (val === 'weekdays') setSchedulePreset('weekdays');
-                    else setNewSchedule({ ...newSchedule, schedule_type: val });
-                  }}
-                  options={[
-                    { value: 'daily', label: 'Setiap hari • Senin sampai Minggu' },
-                    { value: 'weekdays', label: 'Hari kerja • Senin sampai Jumat' },
-                    { value: 'custom', label: 'Pilih hari tertentu' },
-                    { value: 'once', label: 'Sekali siar' }
-                  ]}
-                  variant="light"
-                  className="w-full"
-                  buttonClassName="w-full bg-white justify-between"
-                />
-              </div>
-
-              {/* Day Selection Pills */}
-              {newSchedule.schedule_type !== 'once' && (
-                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-[11px] font-semibold text-slate-700">Pilih Hari Aktif:</label>
-                    <div className="flex items-center gap-1.5 text-[11px]">
-                      <button 
-                        type="button" 
-                        onClick={() => setSchedulePreset('daily')}
-                        className={`hover:underline cursor-pointer ${newSchedule.schedule_type === 'daily' ? 'font-bold text-blue-600' : 'text-slate-500'}`}
-                      >
-                        Semua
-                      </button>
-                      <span className="text-slate-300">•</span>
-                      <button 
-                        type="button" 
-                        onClick={() => setSchedulePreset('weekdays')}
-                        className={`hover:underline cursor-pointer ${newSchedule.schedule_type === 'weekdays' ? 'font-bold text-blue-600' : 'text-slate-500'}`}
-                      >
-                        Sen-Jum
-                      </button>
-                      <span className="text-slate-300">•</span>
-                      <button 
-                        type="button" 
-                        onClick={() => setSchedulePreset('weekends')}
-                        className={`hover:underline cursor-pointer ${newSchedule.days_of_week === 'sat,sun' ? 'font-bold text-blue-600' : 'text-slate-500'}`}
-                      >
-                        Sab-Min
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-7 gap-1">
-                    {DAYS_CONFIG.map(day => {
-                      const isSelected = (newSchedule.days_of_week || '')
-                        .split(',')
-                        .map(d => d.trim().toLowerCase())
-                        .includes(day.key);
-                      return (
-                        <button
-                          key={day.key}
-                          type="button"
-                          onClick={() => toggleScheduleDay(day.key)}
-                          className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
-                            isSelected
-                              ? 'bg-blue-600 border-blue-600 text-white shadow-2xs'
-                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                          }`}
-                          title={day.full}
-                        >
-                          {day.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="pt-1.5 flex justify-end gap-2">
-                <button 
-                  type="button" 
-                  onClick={() => setShowAddSchedule(false)}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  Batal
-                </button>
-                <button 
-                  type="submit" 
-                  disabled={isSavingSchedule}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  {isSavingSchedule ? 'Menyimpan...' : 'Simpan Jadwal'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+              {newSchedule.schedule_type === 'custom' && <div className="form-field"><span className="field-label">Hari siaran</span><div className="weekday-picker" role="group" aria-label="Hari siaran">{DAYS_CONFIG.map(day => <button key={day.key} type="button" aria-pressed={(newSchedule.days_of_week || '').split(',').includes(day.key)} onClick={() => toggleScheduleDay(day.key)} title={day.full}>{day.label}</button>)}</div></div>}
+              {parseScheduleTimes(newSchedule.time_str).length > 1 && <div className="extra-times" aria-label="Waktu tambahan">{parseScheduleTimes(newSchedule.time_str).slice(1).map(time => <span key={time}>{time}<button type="button" onClick={() => handleRemoveTime(time)} className="icon-dismiss" aria-label={'Hapus waktu ' + time}><X size={12} /></button></span>)}</div>}
+              <details className="form-disclosure"><summary>Tambah waktu lain</summary><div className="add-time-row"><label htmlFor="schedule-extra-time" className="sr-only">Waktu tambahan</label><input id="schedule-extra-time" type="time" value={scheduleTimeInput} onChange={e => setScheduleTimeInput(e.target.value)} /><button type="button" onClick={handleAddTime}>Tambahkan waktu</button></div><p className="field-hint">Audio dan tujuan yang sama dapat dijadwalkan beberapa kali sehari.</p></details>
+            </fieldset>
+            <fieldset className="form-section">
+              <legend>Tujuan siaran</legend>
+              <div className="form-field"><span className="field-label">Speaker penerima</span><MultiTargetSelector targetMode={newSchedule.target_mode || 'all'} selectedGroups={newSchedule.target_group ? newSchedule.target_group.split(',').map(group => group.trim()).filter(Boolean) : []} selectedSpeakerIds={newSchedule.target_speakers ? newSchedule.target_speakers.split(',').map(id => parseInt(id.trim(), 10)).filter(Boolean) : (newSchedule.target_speaker_id ? [newSchedule.target_speaker_id] : [])} onChange={({ targetMode, selectedGroups, selectedSpeakerIds }) => setNewSchedule(previous => ({ ...previous, target_mode: targetMode, target_group: selectedGroups.join(', '), target_zone: selectedGroups.join(', '), target_speakers: selectedSpeakerIds.join(', '), target_speaker_id: selectedSpeakerIds[0] || 0 }))} speakers={speakers} groupsList={groupsList} variant="light" size="md" align="left" className="w-full" buttonClassName="w-full bg-white justify-between" /></div>
+              <label className="checkbox-field"><input type="checkbox" checked={newSchedule.target_local} onChange={e => setNewSchedule({ ...newSchedule, target_local: e.target.checked })} /><span>Putar juga di speaker server</span></label>
+            </fieldset>
+          </form>
+        </Modal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL: RIWAYAT AKTIVITAS (AUDIT LOGS)                      */}
       {/* ========================================================= */}
       {showLogsModal && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col p-5 shadow-xl">
-            <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
-              <div>
-                <h3 className="text-base font-semibold text-slate-900">Riwayat Aktivitas</h3>
-                <p className="text-xs text-slate-500">Catatan audit kejadian sistem siaran</p>
-              </div>
-              <button onClick={() => setShowLogsModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-4.5 h-4.5" />
-              </button>
-            </div>
+        <Modal title={<> Riwayat Aktivitas </>} description={<> Catatan audit kejadian sistem siaran </>} onClose={() => setShowLogsModal(false)} size="lg">
 
             <div className="flex-1 overflow-y-auto space-y-2 mt-3 text-xs pr-1">
               {logs.map((log) => (
@@ -3533,372 +3089,36 @@ export default function App() {
                 </div>
               ))}
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL: KONFIRMASI UBAH KONDISI / KATEGORI SUARA           */}
       {/* ========================================================= */}
       {categoryChangeTarget && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
-            {/* Header */}
-            <div className="flex items-start gap-3.5">
-              <div className={`p-2.5 rounded-xl border shrink-0 ${
-                categoryChangeTarget.targetCategory === 'darurat'
-                  ? 'bg-rose-50 border-rose-200 text-rose-600'
-                  : categoryChangeTarget.targetCategory === 'safety'
-                    ? 'bg-amber-50 border-amber-200 text-amber-700'
-                    : 'bg-blue-50 border-blue-200 text-blue-600'
-              }`}>
-                {categoryChangeTarget.targetCategory === 'darurat' ? (
-                  <Siren className="w-6 h-6 animate-pulse" />
-                ) : categoryChangeTarget.targetCategory === 'safety' ? (
-                  <HardHat className="w-6 h-6" />
-                ) : (
-                  <Volume2 className="w-6 h-6" />
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-base font-semibold text-slate-900 leading-snug">
-                  Ubah Prioritas Audio
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  {categoryChangeTarget.targetCategory === 'darurat'
-                    ? 'Prioritas 1: Sirine bahaya, alarm evakuasi, dan peringatan darurat.'
-                    : categoryChangeTarget.targetCategory === 'safety'
-                      ? 'Prioritas 2: Pengumuman K3, briefing keselamatan kerja, dan instruksi APD.'
-                      : 'Prioritas 3: Siaran operasional reguler dan pengumuman rutin harian.'}
-                </p>
-              </div>
-              <button 
-                onClick={() => setCategoryChangeTarget(null)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Content & Details */}
-            <div className="mt-4 p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs space-y-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Nama Tampilan Audio</label>
-                <input
-                  type="text"
-                  value={editingDisplayName}
-                  onChange={e => setEditingDisplayName(e.target.value)}
-                  placeholder="Ketik nama tampilan audio..."
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-900 focus:ring-2 focus:ring-blue-500 outline-hidden font-medium"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-500 mb-1.5">Pilih Kondisi atau Prioritas:</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCategoryChangeTarget(prev => ({ ...prev, targetCategory: 'biasa' }))}
-                    className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
-                      categoryChangeTarget.targetCategory === 'biasa'
-                        ? 'bg-blue-50/90 border-blue-500 text-blue-900 shadow-2xs font-semibold'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 text-xs font-semibold">
-                      <Volume2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                      <span>Rutin</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400 mt-1">Prioritas 3</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCategoryChangeTarget(prev => ({ ...prev, targetCategory: 'safety' }))}
-                    className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
-                      categoryChangeTarget.targetCategory === 'safety'
-                        ? 'bg-amber-50/90 border-amber-500 text-amber-900 shadow-2xs font-semibold'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
-                      <HardHat className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span>K3 Safety</span>
-                    </div>
-                    <div className="text-[10px] text-amber-600/70 mt-1">Prioritas 2</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCategoryChangeTarget(prev => ({ ...prev, targetCategory: 'darurat' }))}
-                    className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
-                      categoryChangeTarget.targetCategory === 'darurat'
-                        ? 'bg-rose-50 border-rose-500 text-rose-900 shadow-2xs font-semibold'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-600">
-                      <Siren className="w-3.5 h-3.5 shrink-0" />
-                      <span>Darurat</span>
-                    </div>
-                    <div className="text-[10px] text-rose-500/70 mt-1">Prioritas 1</div>
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-1 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
-                <span>Nama berkas fisik:</span>
-                <span className="font-medium text-slate-700 truncate max-w-[200px]">{categoryChangeTarget.audio.filename}</span>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setCategoryChangeTarget(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmCategoryChange}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white shadow-xs transition-all cursor-pointer ${
-                  categoryChangeTarget.targetCategory === 'darurat'
-                    ? 'bg-rose-600 hover:bg-rose-700'
-                    : categoryChangeTarget.targetCategory === 'safety'
-                      ? 'bg-amber-600 hover:bg-amber-700'
-                      : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Simpan Perubahan</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal title="Edit audio" description="Ubah nama dan kategori audio di pustaka." onClose={() => setCategoryChangeTarget(null)} footer={<><button type="button" onClick={() => setCategoryChangeTarget(null)}>Batal</button><button type="button" onClick={handleConfirmCategoryChange} className="modal-primary">Simpan perubahan</button></>}>
+          <div className="schedule-form"><div className="form-field"><label htmlFor="audio-display-name">Nama audio</label><input id="audio-display-name" value={editingDisplayName} onChange={e => setEditingDisplayName(e.target.value)} /></div><div className="form-field"><label htmlFor="audio-category">Kategori siaran</label><CustomDropdown id="audio-category" value={categoryChangeTarget.targetCategory} onChange={value => setCategoryChangeTarget(previous => ({ ...previous, targetCategory: value }))} options={[{ value: 'biasa', label: 'Rutin', sublabel: 'Prioritas 3 - pengumuman harian' }, { value: 'safety', label: 'K3 & Safety', sublabel: 'Prioritas 2 - keselamatan kerja' }, { value: 'darurat', label: 'Darurat', sublabel: 'Prioritas 1 - mendahului siaran lain' }]} className="w-full" buttonClassName="w-full bg-white justify-between" /></div></div>
+        </Modal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL: UNGGAH BERKAS AUDIO                                */}
       {/* ========================================================= */}
       {showUploadModal && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg flex flex-col p-5 shadow-xl">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
-                  <Upload className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900">Unggah Berkas Audio</h3>
-                  <p className="text-xs text-slate-500">Pilih berkas dan tentukan tingkat prioritas siaran</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => {
-                  setShowUploadModal(false);
-                  setUploadSelectedFile(null);
-                }} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
-              >
-                <X className="w-4.5 h-4.5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitUpload} className="mt-4 space-y-4">
-              {/* File Selector Dropzone */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Berkas Audio</label>
-                {uploadSelectedFile ? (
-                  <div className="p-3 rounded-xl border border-blue-200 bg-blue-50/40 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs uppercase shrink-0">
-                        {uploadSelectedFile.name.split('.').pop() || 'AUD'}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-slate-900 truncate">
-                          {uploadSelectedFile.name}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          {Math.round(uploadSelectedFile.size / 1024)} KB
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (fileInputRef.current) fileInputRef.current.click();
-                      }}
-                      className="px-2.5 py-1 text-xs font-medium text-blue-600 hover:bg-blue-100/60 rounded-lg cursor-pointer transition-colors"
-                    >
-                      Ganti Berkas
-                    </button>
-                  </div>
-                ) : (
-                  <div 
-                    onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                    className="border-2 border-dashed border-slate-200 hover:border-blue-400 rounded-xl p-5 text-center cursor-pointer transition-colors bg-slate-50/50 hover:bg-blue-50/30"
-                  >
-                    <Upload className="w-7 h-7 text-slate-400 mx-auto mb-1.5" />
-                    <p className="text-xs font-semibold text-slate-700">Pilih berkas suara dari komputer</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Format didukung: MP3, WAV, OGG, FLAC</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Nama Tampilan */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Nama Tampilan Audio
-                </label>
-                <input 
-                  type="text" 
-                  required
-                  placeholder="Contoh: Apel Pagi, Pengingat APD, Sirine Gempa"
-                  value={uploadDisplayName}
-                  onChange={e => setUploadDisplayName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
-                />
-              </div>
-
-              {/* Pilihan Kondisi / Kategori Suara */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-semibold text-slate-700">
-                    Kategori dan Tingkat Prioritas
-                  </label>
-                  <span className="text-[11px] text-slate-400">Pilih salah satu tingkatan</span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  {/* Opsi 1: Rutin */}
-                  <div
-                    onClick={() => setUploadCategory('biasa')}
-                    className={`p-2.5 rounded-xl border-2 cursor-pointer transition-all ${
-                      uploadCategory === 'biasa'
-                        ? 'border-blue-500 bg-blue-50/60 shadow-2xs'
-                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-semibold text-xs text-slate-900 mb-1">
-                      <Volume2 className="w-4 h-4 text-blue-600 shrink-0" />
-                      <span>Rutin</span>
-                    </div>
-                    <div className="text-[10px] font-semibold text-blue-600 mb-1">Prioritas 3</div>
-                    <p className="text-[10px] text-slate-500 leading-tight">
-                      Pengumuman umum, bel pergantian, apel pagi, informasi reguler.
-                    </p>
-                  </div>
-
-                  {/* Opsi 2: K3 & Safety */}
-                  <div
-                    onClick={() => setUploadCategory('safety')}
-                    className={`p-2.5 rounded-xl border-2 cursor-pointer transition-all ${
-                      uploadCategory === 'safety'
-                        ? 'border-amber-500 bg-amber-50/70 shadow-2xs'
-                        : 'border-slate-200 bg-white hover:bg-amber-50/20'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-semibold text-xs text-amber-900 mb-1">
-                      <HardHat className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>K3 & Safety</span>
-                    </div>
-                    <div className="text-[10px] font-semibold text-amber-600 mb-1">Prioritas 2</div>
-                    <p className="text-[10px] text-amber-700/80 leading-tight">
-                      Briefing K3, pengingat keselamatan, pemakaian APD lapangan.
-                    </p>
-                  </div>
-
-                  {/* Opsi 3: Darurat */}
-                  <div
-                    onClick={() => setUploadCategory('darurat')}
-                    className={`p-2.5 rounded-xl border-2 cursor-pointer transition-all ${
-                      uploadCategory === 'darurat'
-                        ? 'border-rose-500 bg-rose-50/70 shadow-2xs'
-                        : 'border-slate-200 bg-white hover:bg-rose-50/20'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 font-semibold text-xs text-rose-700 mb-1">
-                      <Siren className="w-4 h-4 text-rose-600 shrink-0 animate-pulse" />
-                      <span>Darurat</span>
-                    </div>
-                    <div className="text-[10px] font-semibold text-rose-600 mb-1">Prioritas 1</div>
-                    <p className="text-[10px] text-rose-600/80 leading-tight">
-                      Sirine bahaya, alarm evakuasi, gempa, kebakaran, darurat.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Tombol Aksi */}
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
-                <button 
-                  type="button" 
-                  onClick={() => {
-                    setShowUploadModal(false);
-                    setUploadSelectedFile(null);
-                  }}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button 
-                  type="submit" 
-                  disabled={!uploadSelectedFile || isUploading}
-                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white shadow-xs transition-all cursor-pointer disabled:opacity-50 ${
-                    uploadCategory === 'darurat'
-                      ? 'bg-rose-600 hover:bg-rose-700'
-                      : uploadCategory === 'safety'
-                        ? 'bg-amber-600 hover:bg-amber-700'
-                        : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>
-                    {isUploading 
-                      ? 'Mengunggah...' 
-                      : uploadCategory === 'darurat' 
-                        ? 'Unggah Suara Darurat' 
-                        : uploadCategory === 'safety' 
-                          ? 'Unggah Suara K3' 
-                          : 'Unggah Suara Rutin'}
-                  </span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <Modal title="Unggah audio" description="Pilih berkas, beri nama, lalu tentukan kategori siarannya." onClose={() => { setShowUploadModal(false); setUploadSelectedFile(null); }} footer={<><button type="button" onClick={() => { setShowUploadModal(false); setUploadSelectedFile(null); }} disabled={isUploading}>Batal</button><button type="submit" form="upload-form" className="modal-primary" disabled={!uploadSelectedFile || isUploading}>{isUploading ? 'Mengunggah...' : 'Unggah audio'}</button></>}>
+          <form id="upload-form" onSubmit={handleSubmitUpload} className="schedule-form">
+            <div className="form-field"><span className="field-label">Berkas audio</span><button type="button" className="upload-file-picker" onClick={() => fileInputRef.current?.click()}><Upload size={22} /><strong>{uploadSelectedFile ? uploadSelectedFile.name : 'Pilih berkas dari komputer'}</strong><span>{uploadSelectedFile ? Math.round(uploadSelectedFile.size / 1024) + ' KB - Klik untuk mengganti' : 'MP3, WAV, OGG, atau FLAC'}</span></button></div>
+            <div className="form-field"><label htmlFor="upload-name">Nama audio</label><input id="upload-name" required placeholder="Contoh: Apel pagi" value={uploadDisplayName} onChange={e => setUploadDisplayName(e.target.value)} /></div>
+            <div className="form-field"><label htmlFor="upload-category">Kategori siaran</label><CustomDropdown id="upload-category" value={uploadCategory} onChange={setUploadCategory} options={[{ value: 'biasa', label: 'Rutin', sublabel: 'Prioritas 3 - pengumuman harian' }, { value: 'safety', label: 'K3 & Safety', sublabel: 'Prioritas 2 - keselamatan kerja' }, { value: 'darurat', label: 'Darurat', sublabel: 'Prioritas 1 - mendahului siaran lain' }]} className="w-full" buttonClassName="w-full bg-white justify-between" /><p className="field-hint">Kategori menentukan urutan prioritas saat tujuan siaran sedang digunakan.</p></div>
+          </form>
+        </Modal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL: KELOLA GROUP SPEAKER                               */}
       {/* ========================================================= */}
       {showGroupModal && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg max-h-[85vh] flex flex-col p-5 shadow-xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
-                  <Layers className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900">Kelola Group Speaker</h3>
-                  <p className="text-xs text-slate-500">Tambah group baru, ubah nama group, atau hapus group</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => {
-                  setShowGroupModal(false);
-                  setEditingGroupOldName(null);
-                }} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
-              >
-                <X className="w-4.5 h-4.5" />
-              </button>
-            </div>
+        <Modal title={<> Kelola Group Speaker </>} description={<> Tambah group baru, ubah nama group, atau hapus group </>} onClose={() => { setShowGroupModal(false); setEditingGroupOldName(null); }} size="md">
 
             {/* Form Tambah Group */}
             <form onSubmit={handleCreateGroup} className="mt-4 flex gap-2">
@@ -3934,8 +3154,8 @@ export default function App() {
                   const isEditing = editingGroupOldName === g;
 
                   return (
-                    <div 
-                      key={g} 
+                    <div
+                      key={g}
                       className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-2 transition-all hover:bg-slate-100/60"
                     >
                       {isEditing ? (
@@ -4005,8 +3225,8 @@ export default function App() {
             </div>
 
             <div className="pt-3 mt-3 border-t border-slate-100 flex justify-end">
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => {
                   setShowGroupModal(false);
                   setEditingGroupOldName(null);
@@ -4016,33 +3236,14 @@ export default function App() {
                 Tutup
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL: PENGATURAN SISTEM & TOMBOL CEPAT                   */}
       {/* ========================================================= */}
       {showSettings && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-md max-h-[90vh] overflow-y-auto p-5 shadow-xl">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <Settings className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900">Pengaturan Sistem</h3>
-                  <p className="text-[11px] text-slate-500">Atur tombol siaran, codec, dan jaringan</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowSettings(false)} 
-                className="text-slate-400 hover:text-slate-600 cursor-pointer p-1 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X className="w-4.5 h-4.5" />
-              </button>
-            </div>
+        <Modal title={<> Pengaturan Sistem </>} description={<> Atur tombol siaran, codec, dan jaringan </>} onClose={() => setShowSettings(false)} size="md">
 
             <form onSubmit={handleSaveSettings} className="space-y-4">
               {/* Seksi Tombol Cepat */}
@@ -4121,8 +3322,8 @@ export default function App() {
                 <div className="space-y-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/80">
                   <div>
                     <label className="block text-[11px] font-medium text-slate-600 mb-1">Alamat IP Multicast</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={settings.multicast_ip || ''}
                       onChange={e => setSettings({ ...settings, multicast_ip: e.target.value })}
                       className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
@@ -4130,8 +3331,8 @@ export default function App() {
                   </div>
                   <div>
                     <label className="block text-[11px] font-medium text-slate-600 mb-1">Port UDP Multicast</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={settings.multicast_port || ''}
                       onChange={e => setSettings({ ...settings, multicast_port: e.target.value })}
                       className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs focus:ring-2 focus:ring-blue-500 outline-hidden"
@@ -4140,38 +3341,31 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
-                <button 
-                  type="button" 
+              <div className="modal-actions pt-2 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
                   onClick={() => setShowSettings(false)}
                   className="px-3.5 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 cursor-pointer"
                 >
                   Batal
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer"
                 >
                   Simpan Pengaturan
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
       {deleteConfirmation && (
-        <div className="modal-overlay fixed inset-0 bg-slate-900/40 flex items-center justify-center p-4 z-[70]">
-          <div role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description" className="bg-white rounded-2xl border border-slate-200 w-full max-w-md p-5 shadow-xl">
-            <div className="flex items-start gap-3">
-              <Trash2 className="w-5 h-5 text-rose-600 shrink-0 mt-1" />
-              <div className="min-w-0"><h3 id="delete-title" className="text-base font-semibold break-words">Hapus {deleteConfirmation.name}?</h3><p id="delete-description" className="text-xs text-slate-500 mt-2">{deleteConfirmation.description} Tindakan ini tidak bisa dibatalkan.</p></div>
-            </div>
+        <Modal title={<> Hapus {deleteConfirmation.name}? </>} description={<> {deleteConfirmation.description} Tindakan ini tidak bisa dibatalkan. </>} onClose={() => resolveDelete(false)} size="md" role="alertdialog">
             <div className="flex justify-end gap-3 mt-6">
               <button type="button" autoFocus onClick={() => resolveDelete(false)} className="hardware-key" onKeyDown={event => { if (event.key === 'Escape') resolveDelete(false); }}>Batal</button>
               <button type="button" onClick={() => resolveDelete(true)} className="px-4 py-2 bg-rose-600 text-white text-xs font-semibold" onKeyDown={event => { if (event.key === 'Escape') resolveDelete(false); }}>Hapus</button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

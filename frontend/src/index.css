@@ -164,3 +164,84 @@ html { scrollbar-gutter: stable; }
 .siren-countdown { margin-top: 20px; display: flex; align-items: center; gap: 16px; padding: 16px; border-radius: 10px; background: #fff1f2; color: #9f1239; }
 .siren-countdown strong { font: 500 42px 'IBM Plex Mono', monospace; min-width: 1ch; }
 .siren-countdown span { font-size: 12px; }
+
+/* Modal system: one shell, clear fields, restrained depth on actions. */
+.modal-shell { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 24px; background: #15151575; }
+.modal-overlay > .modal-dialog { display: flex; flex-direction: column; width: 100%; max-height: min(90dvh, 900px); overflow: hidden; border: 1px solid #ccc; border-radius: 16px; padding: 0; background: #fff; box-shadow: 0 20px 60px #0003, inset 0 1px 0 #fff; outline: none; }
+.modal-size-md { max-width: 480px; }
+.modal-size-lg { max-width: 640px; }
+.modal-size-wide { max-width: 960px; }
+.modal-dialog > .modal-header { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px; background: #fafafa; border-bottom: 1px solid #e5e5e5; }
+.modal-header h2 { margin: 0; color: #222; font-size: 19px; font-weight: 600; letter-spacing: -.4px; line-height: 1.3; overflow-wrap: anywhere; }
+.modal-header p { margin-top: 6px; max-width: 55ch; color: #666; font-size: 12px; line-height: 1.6; }
+.modal-dialog button.modal-close { display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; padding: 0; border: 1px solid #ddd; border-radius: 8px; background: #fff; color: #555; box-shadow: 0 1px 1px #0001; cursor: pointer; }
+.modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px; }
+.modal-body input:where(:not([type="checkbox"]):not([type="file"])), .modal-body textarea { min-height: 40px; width: 100%; border: 1px solid #ccc; border-radius: 8px; padding: 10px 12px; background: #fff; color: #222; font-size: 13px; box-shadow: inset 0 1px 2px #00000006; }
+.modal-body input[type="checkbox"] { accent-color: #333; width: 16px; height: 16px; flex-shrink: 0; }
+.modal-body button { min-height: 32px; border-radius: 8px; font-size: 12px; }
+.modal-body .dropdown-scroll button { border: 0; border-radius: 6px; background-image: none; box-shadow: none; min-height: 36px; }
+.modal-body .relative > button[aria-expanded], .modal-body .form-field > .relative > button { min-height: 40px; border-radius: 8px; box-shadow: 0 1px 1px #0000000a; }
+.modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; padding-top: 20px; border-top: 1px solid #e5e5e5; }
+.modal-actions > button { min-height: 40px; padding: 10px 16px; background-color: #f4f4f4; color: #333; font-weight: 500; }
+.modal-actions > button.modal-primary, .modal-actions > button.bg-blue-600 { background-color: #262626; color: #fff; }
+.modal-actions > button.bg-rose-600 { background-color: #be123c; color: #fff; }
+.schedule-form { display: grid; gap: 24px; }
+.form-section { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 16px; }
+.form-section + .form-section { padding-top: 22px; border-top: 1px solid #e8e8e8; }
+.form-section legend { float: left; width: 100%; margin: 0 0 2px; color: #333; font-size: 13px; font-weight: 600; }
+.form-field { min-width: 0; display: grid; gap: 7px; }
+.form-field > label, .field-label { color: #555; font-size: 12px; font-weight: 500; }
+.form-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.field-hint { color: #777; font-size: 11px; line-height: 1.6; }
+.weekday-picker { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.weekday-picker button { min-height: 38px; border: 1px solid #d5d5d5; color: #555; background: #fafafa; box-shadow: none; }
+.weekday-picker button[aria-pressed="true"] { background: #292929; border-color: #292929; color: #fff; }
+.extra-times { display: flex; flex-wrap: wrap; gap: 8px; }
+.extra-times > span { display: inline-flex; gap: 6px; align-items: center; padding: 3px 6px 3px 10px; border-radius: 6px; background: #f2f2f2; color: #444; font: 12px 'IBM Plex Mono', monospace; }
+.extra-times button { display: grid; place-items: center; width: 26px; min-height: 26px; border: 0; background: none; box-shadow: none; }
+.form-disclosure summary { color: #555; cursor: pointer; font-size: 12px; width: fit-content; }
+.add-time-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 8px; }
+.add-time-row input { max-width: 150px; }
+.add-time-row button { padding: 8px 12px; background-color: #f3f3f3; white-space: nowrap; }
+.checkbox-field { display: flex; gap: 10px; align-items: center; font-size: 12px; color: #555; }
+.schedule-form .modal-actions { margin-top: 0; }
+.form-error { width: 100%; color: #be123c; font-size: 12px; line-height: 1.5; }
+.next-cue-countdown { font: 10px 'IBM Plex Mono', monospace; color: inherit; }
+@media (max-width: 600px) { .modal-shell { padding: 12px; } .modal-dialog > .modal-header { padding: 20px; } .modal-body { padding: 20px; } .form-columns { grid-template-columns: 1fr; } .modal-actions > button { flex: 1; } .weekday-picker { gap: 4px; } .weekday-picker button { padding: 4px; font-size: 11px; } }
+.modal-dialog > .modal-header > div { height: auto; }
+.modal-dialog > .modal-header { padding-top: 20px; padding-bottom: 20px; }
+.modal-dialog > .modal-footer { flex: 0 0 auto; margin: 0; padding: 16px 24px; background: #fafafa; }
+.modal-footer .form-error { margin: 0 0 4px; }
+.target-picker-menu { min-width: 0 !important; max-width: calc(100vw - 48px); border-radius: 10px; }
+.modal-body .target-picker-menu { width: 100%; max-width: 100%; }
+.target-section-heading { flex-wrap: wrap; gap: 6px 12px; }
+.target-tools { display: flex; align-items: center; gap: 12px; }
+.target-tools > span { display: none; }
+.target-tools button, .modal-body .target-tools button { min-height: 28px; padding: 3px 0; border: 0; border-radius: 0; background: none; box-shadow: none; transform: none; font-size: 11px; line-height: 1.4; color: #555; }
+.target-tools button:hover:not(:disabled) { color: #111; text-decoration: underline; }
+.target-tools button:disabled { opacity: .45; cursor: default; }
+/* The same shallow, tactile surface is used for buttons and dropdown choices. */
+.modal-body button, .modal-footer button, .modal-body .relative > button[aria-expanded] { box-shadow: inset 0 1px 0 #fff8, 0 2px 0 #0002, 0 3px 4px #00000008; }
+.modal-body .dropdown-scroll button { border: 1px solid #d5d5d5; background-image: linear-gradient(#fff6, #00000005); box-shadow: inset 0 1px 0 #fff, 0 2px 0 #00000016; margin-bottom: 4px; }
+.modal-body .dropdown-scroll button:active, .modal-body button:active:not(:disabled), .modal-footer button:active:not(:disabled) { box-shadow: inset 0 1px 3px #0002, 0 1px 0 #fff; transform: translateY(1px); }
+.target-picker-menu label { border-radius: 8px; box-shadow: inset 0 1px 0 #fff5, 0 2px 0 #00000012; }
+.target-picker-menu label:has(input:checked) { box-shadow: inset 0 1px 3px #0002; }
+.upload-file-picker { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 22px 16px; border: 1px solid #ccc; border-radius: 8px; background-color: #f6f6f6; color: #555; text-align: center; }
+.upload-file-picker strong { max-width: 100%; overflow-wrap: anywhere; font-size: 12px; font-weight: 500; }
+.upload-file-picker span { font-size: 11px; color: #777; }
+.modal-body .relative > input { padding-left: 36px; padding-right: 32px; }
+.modal-body .relative > input[type="time"] { padding-left: 12px; }
+.dropdown-scroll { padding: 8px; }
+.dropdown-scroll button { min-height: 40px; padding-top: 9px; padding-bottom: 9px; }
+.siren-countdown strong small { display: block; margin-top: 4px; font: 11px 'DM Sans', sans-serif; }
+.modal-dialog button.modal-close, .modal-dialog button.modal-close:active { box-shadow: none; background: transparent; border-color: transparent; transform: none; }
+.modal-dialog button.modal-close:hover { background: #ededed; }
+/* Dismiss icons are flat, including remove buttons inside time chips. */
+.intanwave-console button.icon-dismiss,
+.intanwave-console button.icon-dismiss:active:not(:disabled) {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.intanwave-console button.icon-dismiss:hover { background: #e5e5e5; }
