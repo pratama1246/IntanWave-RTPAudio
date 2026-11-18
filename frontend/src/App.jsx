@@ -1929,7 +1929,6 @@ export default function App() {
               />
               <div className="flex items-center gap-2">
                 <span className="text-base font-semibold text-slate-900 leading-none">IntanWave</span>
-                <span className="text-xs text-slate-500 font-normal hidden sm:inline">Audio Server</span>
               </div>
             </div>
 
@@ -1990,12 +1989,12 @@ export default function App() {
       <main className="console-workspace max-w-7xl mx-auto px-4 sm:px-6 py-5 flex-1 w-full space-y-4">
 
         <div className="console-heading">
-          <div><span className="console-eyebrow">IntanWave / Konsol operator</span><h1>Ruang siaran.</h1><p>Kelola jadwal dan siarkan audio ke speaker.</p></div>
+          <div><h1>Ruang siaran.</h1><p>Kelola jadwal dan siarkan audio ke speaker.</p></div>
           <div className="console-clock"><span>{serverDateDisplay}</span><strong>{serverHours}:{serverMinutes}<small>:{serverSeconds}</small></strong><span>Waktu server · WIB</span></div>
         </div>
         <div className="console-deck">
           <section className={'broadcast-module broadcast-frame-' + broadcastFrameState} aria-label="Ringkasan siaran">
-            <div className="module-top"><span><Radio size={14} /> Pusat kendali audio</span><span className="module-serial">IntanWave · RTP</span></div>
+            <div className="module-top"><span><Radio size={14} /> Pusat kendali audio</span></div>
             <div className={isPlaying ? 'receiver-display is-broadcasting' : 'receiver-display'}>
               <div className="display-copy">
                 <span className="display-state"><i className={isPlaying ? 'led live' : 'led'} />{hasEmergency ? 'Siaran darurat' : hasSafety ? 'Siaran keselamatan' : isPlaying ? 'Sedang mengudara' : 'Sistem siaga'}</span>
