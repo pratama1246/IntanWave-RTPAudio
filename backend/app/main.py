@@ -693,7 +693,7 @@ class ScheduleCreate(BaseModel):
     days_of_week: Optional[str] = "mon,tue,wed,thu,fri"
     interval_hours: Optional[int] = 2
     target_multicast: bool = True
-    target_local: bool = True
+    target_local: bool = False
     target_mode: Optional[str] = "all"
     target_group: Optional[str] = ""
     target_zone: Optional[str] = ""
@@ -799,7 +799,7 @@ _last_manual_triggers = {}
 
 @app.post("/api/schedules/{schedule_id}/trigger")
 def trigger_schedule_manually(schedule_id: int):
-    """Memicu jadwal berbunyi seketika sesuai target spesifik yang tersimpan di jadwal tersebut."""
+    """Meminta pemutaran jadwal sesuai target dan antrean playback."""
     now = time.time()
     if _last_manual_triggers.get(schedule_id) and (now - _last_manual_triggers[schedule_id] < 1.5):
         return {"message": "Permintaan beruntun diabaikan (anti dobel-klik)", "status": "debounced"}
@@ -812,7 +812,7 @@ def trigger_schedule_manually(schedule_id: int):
 
     threading.Thread(target=trigger_schedule_job, args=[schedule_id, True], daemon=True).start()
     log_event("SCHEDULE_MANUAL_TRIGGER", f"Memicu siaran jadwal secara manual: '{row['name']}'")
-    return {"message": f"Jadwal '{row['name']}' sedang disiarkan sesuai targetnya"}
+    return {"message": f"Permintaan pemutaran jadwal '{row['name']}' diterima"}
 
 # --- HEALTH, SETTINGS & LOGS ---
 @app.get("/api/health")

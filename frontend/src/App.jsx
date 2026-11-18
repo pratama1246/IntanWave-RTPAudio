@@ -739,7 +739,7 @@ export default function App() {
     target_speaker_id: 0,
     target_speakers: '',
     target_multicast: true,
-    target_local: true
+    target_local: false
   });
   const [scheduleTimeInput, setScheduleTimeInput] = useState('08:00');
 
@@ -1551,7 +1551,7 @@ export default function App() {
       target_speaker_id: 0,
       target_speakers: '',
       target_multicast: true,
-      target_local: true
+      target_local: false
     });
     setScheduleTimeInput('08:00');
     setShowAddSchedule(true);
@@ -3308,6 +3308,15 @@ export default function App() {
                   className="w-full"
                 />
               </div>
+
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={newSchedule.target_local}
+                  onChange={event => setNewSchedule({ ...newSchedule, target_local: event.target.checked })}
+                />
+                Putar juga di speaker server
+              </label>
 
               {/* Multi-Time Picker */}
               <div>

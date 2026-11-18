@@ -63,8 +63,10 @@ def trigger_schedule_job(schedule_id: int, force: bool = False):
         target_speaker_ids = list(dict.fromkeys(raw_ids))
 
         is_all_mode = (tmode == "all" and not target_groups and not target_speaker_ids)
+        enable_multicast = bool(row["target_multicast"]) and is_all_mode
+        enable_local = bool(row["target_local"])
 
-        if not is_all_mode and (target_groups or target_speaker_ids):
+        if not is_all_mode:
             matching_dict = {}
             with get_db() as conn:
                 all_spk_rows = conn.execute("SELECT id, name, ip_address, port, groups, zone FROM speakers WHERE enabled = 1 AND ip_address NOT LIKE 'pending-%'").fetchall()
@@ -101,19 +103,21 @@ def trigger_schedule_job(schedule_id: int, force: bool = False):
                 mc_ip = settings.get("multicast_ip", DEFAULT_MULTICAST_IP)
                 mc_port = settings.get("multicast_port", str(DEFAULT_MULTICAST_PORT))
                 target_endpoints = [f"{r['ip_address']}:{r['port']}" for r in sp_rows]
-                target_endpoints.append(f"{mc_ip}:{mc_port}")
-                target_desc = f"Semua Speaker ({len(sp_rows)} Speaker & Multicast)"
+                if enable_multicast:
+                    target_endpoints.append(f"{mc_ip}:{mc_port}")
+                multicast_desc = " & Multicast" if enable_multicast else ""
+                target_desc = f"Semua Speaker ({len(sp_rows)} Speaker{multicast_desc})"
 
         cat = row["category"] if "category" in row.keys() else "biasa"
         audio_engine.play(
             file_path=str(fpath.resolve()),
             title=f"[Jadwal] {row['name']}",
-            enable_multicast=bool(row["target_multicast"]),
-            enable_local=bool(row["target_local"]),
+            enable_multicast=enable_multicast,
+            enable_local=enable_local,
             target_endpoints=target_endpoints,
             target_desc=target_desc,
             category=cat,
-            is_manual=force
+            is_manual=False
         )
     except Exception as e:
         log_event("SCHEDULE_ERROR", f"Gagal mengeksekusi jadwal '{row['name']}': {e}", level="ERROR")

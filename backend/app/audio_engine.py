@@ -39,7 +39,7 @@ class QueuedPlayback:
     title: str
     enable_multicast: Optional[bool]
     enable_local: Optional[bool]
-    target_endpoints: Optional[List[str]]
+    rtp_list: List[str]
     target_desc: Optional[str]
     category: str
     priority: int
@@ -236,16 +236,13 @@ class AudioEngine:
     ) -> Tuple[Set[str], List[str]]:
         footprint: Set[str] = set()
         mc_ep = f"{mc_ip}:{mc_port}"
-        rtp_list = list(dict.fromkeys(target_endpoints)) if target_endpoints else []
-
-        if not rtp_list:
-            rtp_list = [mc_ep]
-            footprint.add("ALL_RTP")
+        if target_endpoints is None:
+            rtp_list = [mc_ep] if enable_multicast else []
         else:
-            if mc_ep in rtp_list or enable_multicast:
-                footprint.add("ALL_RTP")
-            for ep in rtp_list:
-                footprint.add(f"rtp:{ep}")
+            rtp_list = list(dict.fromkeys(target_endpoints))
+        if mc_ep in rtp_list:
+            footprint.add("ALL_RTP")
+        footprint.update(f"rtp:{ep}" for ep in rtp_list)
 
         if enable_local:
             footprint.add("LOCAL")
@@ -267,8 +264,8 @@ class AudioEngine:
         Memulai playback audio dengan Multi-Zone Parallel Streaming & Priority Queue.
         Jika target speaker berbeda/disjoint, streaming berjalan paralel tanpa saling potong.
         Jika target speaker bentrok:
-        - Manual trigger atau prioritas lebih tinggi akan memotong stream lama.
-        - Jadwal otomatis dengan prioritas sama/rendah dimasukkan ke antrean FIFO.
+        - Siaran langsung manual dapat memotong stream lama.
+        - Jadwal menunggu sesuai prioritas dan urutan masuk.
         """
         path_obj = Path(file_path)
         if not path_obj.exists():
@@ -294,6 +291,9 @@ class AudioEngine:
             mc_ip=mc_ip,
             mc_port=mc_port
         )
+        mc_enabled = "ALL_RTP" in footprint
+        if not footprint:
+            raise ValueError("Tidak ada output audio yang aktif")
 
         now = time.time()
 
@@ -312,32 +312,26 @@ class AudioEngine:
                         self._stop_session_locked(s.session_id, reason="OVERRIDDEN")
                         log_event("PLAYBACK_OVERRIDDEN", f"Siaran manual '{title}' memotong siaran aktif '{s.title}' pada target yang sama")
                 else:
-                    highest_active_prio = min(s.priority for s in overlapping)
-                    if prio < highest_active_prio:
-                        for s in overlapping:
-                            self._stop_session_locked(s.session_id, reason="PREEMPTED")
-                            log_event("PLAYBACK_PREEMPTED", f"Audio prioritas tinggi '{title}' (P{prio}) memotong siaran '{s.title}' (P{s.priority})")
-                    else:
-                        q_item = QueuedPlayback(
-                            queue_id=uuid.uuid4().hex[:8],
-                            file_path=str(path_obj.resolve()),
-                            title=title,
-                            enable_multicast=mc_enabled,
-                            enable_local=loc_enabled,
-                            target_endpoints=target_endpoints,
-                            target_desc=desc,
-                            category=resolved_cat,
-                            priority=prio,
-                            is_manual=False,
-                            created_at=time.time(),
-                            footprint=footprint
-                        )
-                        self.playback_queue.append(q_item)
-                        self.playback_queue.sort(key=lambda x: (x.priority, x.created_at))
-                        active_titles = ", ".join(s.title for s in overlapping)
-                        log_event("SCHEDULE_QUEUED", f"Jadwal '{title}' (P{prio}) dimasukkan ke antrean karena speaker sedang memutar '{active_titles}'")
-                        self.notify_listeners()
-                        return {"status": "QUEUED", "queue_id": q_item.queue_id, "title": title}
+                    q_item = QueuedPlayback(
+                        queue_id=uuid.uuid4().hex[:8],
+                        file_path=str(path_obj.resolve()),
+                        title=title,
+                        enable_multicast=mc_enabled,
+                        enable_local=loc_enabled,
+                        rtp_list=rtp_list,
+                        target_desc=desc,
+                        category=resolved_cat,
+                        priority=prio,
+                        is_manual=False,
+                        created_at=time.time(),
+                        footprint=footprint
+                    )
+                    self.playback_queue.append(q_item)
+                    self.playback_queue.sort(key=lambda x: (x.priority, x.created_at))
+                    active_titles = ", ".join(s.title for s in overlapping)
+                    log_event("SCHEDULE_QUEUED", f"Jadwal '{title}' (P{prio}) dimasukkan ke antrean karena speaker sedang memutar '{active_titles}'")
+                    self.notify_listeners()
+                    return {"status": "QUEUED", "queue_id": q_item.queue_id, "title": title}
 
             session_id = self._start_session_locked(
                 file_path=str(path_obj.resolve()),
@@ -485,6 +479,7 @@ class AudioEngine:
                 except Exception:
                     try:
                         proc.kill()
+                        proc.wait()
                     except Exception:
                         pass
         session.multicast_proc = None
@@ -505,18 +500,6 @@ class AudioEngine:
             )
             if not overlaps:
                 try:
-                    settings = get_settings()
-                    mc_ip = settings.get("multicast_ip", DEFAULT_MULTICAST_IP)
-                    mc_port = settings.get("multicast_port", str(DEFAULT_MULTICAST_PORT))
-
-                    footprint, rtp_list = self._calculate_footprint(
-                        enable_multicast=bool(candidate.enable_multicast),
-                        enable_local=bool(candidate.enable_local),
-                        target_endpoints=candidate.target_endpoints,
-                        mc_ip=mc_ip,
-                        mc_port=mc_port
-                    )
-
                     path_obj = Path(candidate.file_path)
                     log_event("SCHEDULE_DEQUEUED", f"Menjalankan jadwal antrean: '{candidate.title}' -> {candidate.target_desc}")
 
@@ -529,9 +512,9 @@ class AudioEngine:
                         enable_multicast=bool(candidate.enable_multicast),
                         enable_local=bool(candidate.enable_local),
                         target_desc=candidate.target_desc or "Semua Speaker",
-                        target_endpoints=candidate.target_endpoints,
-                        footprint=footprint,
-                        rtp_list=rtp_list
+                        target_endpoints=candidate.rtp_list,
+                        footprint=candidate.footprint,
+                        rtp_list=candidate.rtp_list
                     )
                 except Exception as e:
                     log_event("SCHEDULE_ERROR", f"Gagal menjalankan item antrean '{candidate.title}': {e}", level="ERROR")
